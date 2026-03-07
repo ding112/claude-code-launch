@@ -1,0 +1,40 @@
+---
+description: Tauri Command 必须使用异步模式，禁止在主线程执行阻塞操作
+globs: src-tauri/**/*.rs
+alwaysApply: false
+---
+
+# Tauri Command 不阻塞主线程
+
+所有涉及 I/O、子进程、网络请求的 Tauri Command 必须使用 `async` + `spawn_blocking` 模式，禁止同步阻塞主线程。
+
+## 规则
+
+1. Tauri Command 中包含以下操作时，**必须**声明为 `async` 并用 `spawn_blocking` 包裹：
+   - 子进程调用（`Command::new(...).output()` / `.status()` / `.spawn()`）
+   - 文件系统 I/O（读写文件、目录探测）
+   - 网络请求（`reqwest::blocking::get` 等）
+   - 任何耗时超过几毫秒的计算
+
+2. 仅内存操作（构造结构体、`app.emit` 等）的轻量 Command 可以保持同步。
+
+## 正确示例
+
+```rust
+#[tauri::command]
+pub async fn check_prereqs() -> PrereqResult {
+    tauri::async_runtime::spawn_blocking(prereq_service::check_prereqs)
+        .await
+        .unwrap_or_else(|_| PrereqResult { /* 默认值 */ })
+}
+```
+
+## 错误示例
+
+```rust
+// 阻塞主线程，导致窗口冻结
+#[tauri::command]
+pub fn check_prereqs() -> PrereqResult {
+    prereq_service::check_prereqs() // 内部调用子进程，同步等待
+}
+```
