@@ -13,64 +13,85 @@ npm run tauri dev
 
 # 生产构建
 npm run tauri build
+
+# 仅检查 Rust 编译
+cd src-tauri && cargo check
+
+# 独立 HTTP Server（无 GUI）
+cd src-tauri && cargo run --bin local_api
 ```
 
 ## 项目架构
 
-这是一个基于 Tauri 2 + React 19 + TypeScript 的桌面应用，用于 Claude Code 安装向导。
+基于 Tauri 2 + React 19 + TypeScript 的桌面应用，合并了 Claude Code 安装向导与 Agent 会话监控功能。
 
-### 前端架构（React）
+### 应用启动流程
 
-- **src/App.tsx** - 主流程控制，处理检测 → 安装 → 验证三个步骤
+1. `lib.rs` → `refresh_path_from_registry()` → `load_app_config()` → spawn HTTP Server → Tauri App
+2. 前端 `App.tsx` → `check_prereqs` → Claude Code 已安装则进入 dashboard，否则进入 setup
+
+### 前端架构（React + Tailwind CSS 4）
+
+- **src/App.tsx** - 主入口，状态驱动路由（loading → setup → dashboard）
+- **src/pages/** - 页面
+  - `SessionsPage.tsx` - 会话列表 + 事件时间线 + Transcript + 评估
+  - `SettingsPage.tsx` - LLM 评估配置 + Hooks 管理
+  - `SetupPage.tsx` - 一键安装（detect → install → verify）
 - **src/components/** - UI 组件
+  - `TabSwitcher.tsx` - 三 Tab 切换（Sessions | Settings | Setup）
+  - `LogPanel.tsx` - 安装日志面板
   - `Stepper.tsx` - 步骤指示器
-  - `LogPanel.tsx` - 日志面板
+  - `EventItemView.tsx` - 事件卡片
+  - `Pager.tsx` - 分页
+  - `AddCommandInput.tsx` - 命令输入
 - **src/hooks/** - 自定义 Hooks
-  - `usePrereqs.ts` - 环境检测逻辑
-  - `useInstall.ts` - 安装逻辑
-  - `useVerify.ts` - 验证逻辑
-- **src/types.ts** - 前后端共享类型定义（Rust serde 与 TypeScript）
+  - `usePrereqs.ts` / `useInstall.ts` / `useVerify.ts` - 安装向导
+  - `useSessions.ts` / `useEvents.ts` / `useEvaluations.ts` - 监控数据
+  - `useTranscript.ts` - Transcript 同步
+  - `useEvalSettings.ts` / `useHooksConfig.ts` - 设置
+- **src/types.ts** - 前后端共享类型（安装 + 监控）
+- **src/api.ts** - REST API 客户端（与 Axum HTTP Server 通信）
+- **src/constants.ts** - API 地址、风险样式、已知事件类型
 
-### 后端架构（Rust / Tauri）
+### 后端架构（Rust / Tauri + Axum）
 
-- **src-tauri/src/lib.rs** - Tauri 入口，注册命令
-- **src-tauri/src/commands/mod.rs** - Tauri Command 入口
-  - `check_prereqs` - 检测环境
-  - `run_install` - 执行安装
-  - `run_verify` - 执行验证
-  - `append_log` - 附加日志
-- **src-tauri/src/services/** - 业务逻辑
-  - `prereq_service.rs` - 环境检测服务
-  - `install_service.rs` - 安装服务
-  - `node_install_service.rs` - Node.js 自动安装服务（Windows 专用）
-  - `verify_service.rs` - 验证服务
-- **src-tauri/src/dao/** - 数据访问层
-  - `command_exists` - 检查命令是否存在
-  - `run_command_with_streaming_logs_timeout` - 执行命令并流式输出日志
-  - `download_file` - 下载文件
-  - `refresh_path_from_registry` - Windows 专用：从注册表刷新 PATH
-- **src-tauri/src/models/mod.rs** - 数据结构（与前端 types.ts 对应）
+- **src-tauri/src/lib.rs** - Tauri 入口，模块声明，HTTP Server 启动
+- **src-tauri/src/commands/** - Tauri Command（安装向导）
+  - `check_prereqs` / `run_install` / `run_verify` / `append_log`
+- **src-tauri/src/services/** - 安装业务逻辑
+- **src-tauri/src/dao/** - 子进程执行、文件下载、PATH 刷新
+- **src-tauri/src/models/** - 安装向导数据结构
+- **src-tauri/src/collection.rs** - Axum HTTP Server 主模块（路由、AppState、类型）
+- **src-tauri/src/collection/** - 子模块
+  - `db.rs` - SQLite schema + 持久化
+  - `handlers.rs` - HTTP handler
+  - `hooks.rs` - Claude settings.json 读写
+  - `transcript.rs` - Transcript 增量同步
+  - `transcript_poller.rs` - 后台轮询
+  - `eval_queue.rs` - 评估任务队列
+- **src-tauri/src/evaluation.rs** - LLM 评估（OpenAI / Anthropic / Ollama）
+- **src-tauri/src/app_config.rs** - 配置加载（~/.config/claude-code-launch/config.json）
+- **src-tauri/src/overseer_models.rs** - JSON Schema 模型
+- **src-tauri/src/bin/local_api.rs** - 独立 HTTP Server binary
 
 ### 前后端通信
 
-- **Tauri Command** - 使用 `invoke()` 调用后端命令
-- **Tauri Events** - 使用 `emit()` / `listen()` 传递日志事件（`launch-log`）
-- 日志流：后端通过 emit 发送 LogEvent，前端通过 listen 接收并显示
+- **Tauri Command** - `invoke()` 调用安装向导命令
+- **REST API** - 前端通过 `api.ts` 与 Axum HTTP Server 通信（默认 localhost:8787）
+- **Tauri Events** - `emit()` / `listen()` 传递日志事件（`launch-log`）
 
-### 类型共享
+### 配置
 
-前后端通过 TypeScript 类型定义保持一致：
-- Rust 模型使用 `#[serde(rename_all = "camelCase")]` 序列化为 camelCase
-- TypeScript 直接使用 camelCase 类型
+- 配置文件：`~/.config/claude-code-launch/config.json`
+- 环境变量：`CLAUDE_CODE_LAUNCH_CONFIG_PATH`（覆盖配置路径）、`CLAUDE_CODE_LAUNCH_PORT`（HTTP 端口，默认 8787）
 
-### Windows 特殊处理
+### Python Hooks
 
-- **PATH 刷新** - `refresh_path_from_registry()` 从注册表读取最新的用户/系统 PATH，并探测 fnm/nvm 等版本管理器的 Node.js 路径
-- **Node.js 自动安装** - Windows 下 npm 不可用时自动下载 Node.js LTS MSI 并静默安装
-- **命令执行** - Windows 下通过 `cmd /C` 执行命令以支持 .cmd 文件
+- `hooks/report_event.py` - 事件上报脚本，被 Claude Code / Cursor 调用
+- `hooks/init_hooks.py` - 将 report_event.py 注册到 `~/.claude/settings.json`
 
 ### Vite 配置
 
+- Tailwind CSS 4 通过 `@tailwindcss/vite` 插件集成
 - 开发服务器固定端口：1420
-- HMR 端口：1421
 - 忽略 `src-tauri` 目录的 watch

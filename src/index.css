@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 :root {
   color-scheme: light;
@@ -8,15 +6,34 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
 }
 
 body {
   margin: 0;
-  font-family:
-    "Segoe UI",
-    "PingFang SC",
-    "Hiragino Sans GB",
-    "Microsoft YaHei",
-    sans-serif;
   background: #f8fafc;
+}
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Geist Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+
+  --color-risk-high-bg: #fef2f2;
+  --color-risk-high-text: #991b1b;
+  --color-risk-high-border: #fca5a5;
+
+  --color-risk-medium-bg: #fffbeb;
+  --color-risk-medium-text: #92400e;
+  --color-risk-medium-border: #fcd34d;
+
+  --color-risk-low-bg: #ecfdf5;
+  --color-risk-low-text: #065f46;
+  --color-risk-low-border: #6ee7b7;
+
+  --color-risk-none-bg: #f9fafb;
+  --color-risk-none-text: #6b7280;
+  --color-risk-none-border: #e5e7eb;
 }

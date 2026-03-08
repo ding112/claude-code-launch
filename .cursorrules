@@ -1,0 +1,17 @@
+# Cursor Rules for Project
+
+## Git Commit Message Rules
+
+请根据我当前的代码变更，生成一条符合 Conventional Commits 规范的 Git 提交信息。
+
+要求：
+
+格式： <type>(<scope>): <subject>，接着是空行，然后是详细的 <body>。
+
+Type 必须是以下之一： feat (新功能), fix (修补 bug), docs (文档), style (格式), refactor (重构), test (测试), chore (构建过程或辅助工具的变动)。
+
+语言： 使用中文描述。
+
+细节： 简明扼要地说明‘为什么’做了这些改动，而不仅仅是‘改了什么’。
+
+输出： 只提供 Git Message 文本，方便我直接复制。
