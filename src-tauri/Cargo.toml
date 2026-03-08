@@ -31,6 +31,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 schemars = "0.8"
+dirs = "6"
 
 [dev-dependencies]
 tower = "0.5"

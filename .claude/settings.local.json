@@ -6,7 +6,11 @@
       "Bash(git mv:*)",
       "Bash(cp:*)",
       "Bash(git add:*)",
-      "Bash(gh pr:*)"
+      "Bash(gh pr:*)",
+      "Bash(grep:*)",
+      "Bash(powershell:*)",
+      "Bash(rustc:*)",
+      "Bash(git:*)"
     ]
   }
 }

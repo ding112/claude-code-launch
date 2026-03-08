@@ -25,7 +25,6 @@ pub(super) fn sync_transcript_after_event(
     let Some(transcript_path) = extract_transcript_path(&event.payload) else {
         return;
     };
-    let transcript_path = transcript_path.to_string();
     let session_id = event.session_id.clone();
 
     let existing_state = {
@@ -38,16 +37,18 @@ pub(super) fn sync_transcript_after_event(
                 return;
             }
         };
-        match load_transcript_sync_state(&db_guard, &session_id) {
-            Ok(state) => state,
-            Err(error) => {
-                record_transcript_error_with_db(
-                    db, &session_id, &transcript_path,
-                    format!("failed to load transcript sync state: {error:?}"),
-                    format!("{error:?}"),
-                );
-                return;
-            }
+        load_transcript_sync_state(&db_guard, &session_id)
+    };
+
+    let existing_state = match existing_state {
+        Ok(state) => state,
+        Err(error) => {
+            record_transcript_error_with_db(
+                db, &session_id, &transcript_path,
+                format!("failed to load transcript sync state: {error:?}"),
+                format!("{error:?}"),
+            );
+            return;
         }
     };
 
@@ -130,12 +131,37 @@ fn record_transcript_error_with_db(
     }
 }
 
-fn extract_transcript_path(payload: &Value) -> Option<&str> {
-    payload
+fn extract_transcript_path(payload: &Value) -> Option<String> {
+    let raw = payload
         .get("stdin_json")
         .and_then(|stdin_json| stdin_json.get("transcript_path"))
         .and_then(Value::as_str)
-        .filter(|path| !path.trim().is_empty())
+        .filter(|path| !path.trim().is_empty())?;
+
+    let path = std::path::Path::new(raw);
+
+    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        eprintln!("level=warn event=transcript_path_rejected reason=parent_dir_component path={raw}");
+        return None;
+    }
+
+    if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        eprintln!("level=warn event=transcript_path_rejected reason=invalid_extension path={raw}");
+        return None;
+    }
+
+    if let Ok(canonical) = path.canonicalize() {
+        let home = dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h));
+        if let Some(home) = home {
+            if !canonical.starts_with(&home) {
+                eprintln!("level=warn event=transcript_path_rejected reason=outside_home_dir path={raw}");
+                return None;
+            }
+        }
+        return Some(canonical.to_string_lossy().to_string());
+    }
+
+    Some(raw.to_string())
 }
 
 pub(super) fn load_transcript_sync_state(
