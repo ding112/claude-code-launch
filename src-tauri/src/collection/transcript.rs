@@ -138,6 +138,10 @@ fn extract_transcript_path(payload: &Value) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|path| !path.trim().is_empty())?;
 
+    validate_transcript_path(raw)
+}
+
+pub(super) fn validate_transcript_path(raw: &str) -> Option<String> {
     let path = std::path::Path::new(raw);
 
     if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
@@ -191,6 +195,12 @@ pub(super) fn read_transcript_increment(
     transcript_path: &str,
     existing_state: Option<&TranscriptSyncState>,
 ) -> std::io::Result<TranscriptReadResult> {
+    if validate_transcript_path(transcript_path).is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("transcript path rejected by validation: {transcript_path}"),
+        ));
+    }
     let mut file = File::open(transcript_path)?;
     let metadata = file.metadata()?;
     let file_size_bytes = metadata.len() as i64;
