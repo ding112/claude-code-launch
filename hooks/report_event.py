@@ -246,10 +246,6 @@ def report_with_retry(payload: dict) -> bool:
 
 
 def report_with_background_thread(payload: dict) -> None:
-    timeout_seconds = float(os.getenv("CODE_AGENT_HOOK_TIMEOUT_SECONDS", "3"))
-    max_attempts = int(os.getenv("CODE_AGENT_HOOK_RETRY_ATTEMPTS", "4"))
-    join_timeout = timeout_seconds * max_attempts + 2.0
-
     def worker() -> None:
         try:
             report_with_retry(payload)
@@ -258,7 +254,6 @@ def report_with_background_thread(payload: dict) -> None:
 
     thread = threading.Thread(target=worker, name="hook-report-worker", daemon=True)
     thread.start()
-    thread.join(timeout=join_timeout)
 
 
 def main() -> int:

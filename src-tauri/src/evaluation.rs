@@ -334,13 +334,15 @@ fn classify_http_status(provider: &str, status: StatusCode, body: &str, event_id
 }
 
 fn build_prompt(input: &EvaluationInput) -> String {
+    let mut sanitized_payload = input.payload.clone();
+    crate::collection::sanitize_json_value(&mut sanitized_payload);
     format!(
         "请评估以下事件并输出 JSON:\n\
          event_id: {}\n\
          event_type: {}\n\
          payload: {}\n\
          仅输出 JSON。",
-        input.event_id, input.event_type, input.payload
+        input.event_id, input.event_type, sanitized_payload
     )
 }
 

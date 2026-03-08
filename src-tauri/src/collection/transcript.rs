@@ -18,7 +18,10 @@ pub(super) struct TranscriptReadResult {
     pub(super) reset_content: bool,
 }
 
-pub(super) fn sync_transcript_after_event(state: &AppState, event: &IncomingEvent) {
+pub(super) fn sync_transcript_after_event(
+    db: &Arc<Mutex<Connection>>,
+    event: &IncomingEvent,
+) {
     let Some(transcript_path) = extract_transcript_path(&event.payload) else {
         return;
     };
@@ -26,28 +29,24 @@ pub(super) fn sync_transcript_after_event(state: &AppState, event: &IncomingEven
     let session_id = event.session_id.clone();
 
     let existing_state = {
-        let db = match state.db.lock() {
-            Ok(db) => db,
+        let db_guard = match db.lock() {
+            Ok(guard) => guard,
             Err(error) => {
-                return record_transcript_error(
-                    state,
-                    &session_id,
-                    &transcript_path,
-                    format!("failed to lock sqlite connection for transcript lookup: {error:?}"),
-                    format!("{error:?}"),
+                eprintln!(
+                    "level=error event=transcript_sync stage=lock_sqlite_lookup session_id={session_id} error={error:?}"
                 );
+                return;
             }
         };
-        match load_transcript_sync_state(&db, &session_id) {
+        match load_transcript_sync_state(&db_guard, &session_id) {
             Ok(state) => state,
             Err(error) => {
-                return record_transcript_error(
-                    state,
-                    &session_id,
-                    &transcript_path,
+                record_transcript_error_with_db(
+                    db, &session_id, &transcript_path,
                     format!("failed to load transcript sync state: {error:?}"),
                     format!("{error:?}"),
                 );
+                return;
             }
         }
     };
@@ -55,37 +54,78 @@ pub(super) fn sync_transcript_after_event(state: &AppState, event: &IncomingEven
     let read_result = match read_transcript_increment(&transcript_path, existing_state.as_ref()) {
         Ok(result) => result,
         Err(error) => {
-            return record_transcript_error(
-                state,
-                &session_id,
-                &transcript_path,
+            record_transcript_error_with_db(
+                db, &session_id, &transcript_path,
                 error.to_string(),
                 format!("{error:?}"),
             );
+            return;
         }
     };
 
-    let mut db = match state.db.lock() {
-        Ok(db) => db,
+    let mut db_guard = match db.lock() {
+        Ok(guard) => guard,
         Err(error) => {
-            return record_transcript_error(
-                state,
-                &session_id,
-                &transcript_path,
-                format!("failed to lock sqlite connection for transcript upsert: {error:?}"),
-                format!("{error:?}"),
+            eprintln!(
+                "level=error event=transcript_sync stage=lock_sqlite_upsert session_id={session_id} error={error:?}"
             );
+            return;
         }
     };
     if let Err(error) =
-        upsert_transcript_sync_state(&mut db, &session_id, &transcript_path, &read_result)
+        upsert_transcript_sync_state(&mut db_guard, &session_id, &transcript_path, &read_result)
     {
-        record_transcript_error(
-            state,
-            &session_id,
-            &transcript_path,
-            format!("failed to upsert transcript sync state: {error:?}"),
-            format!("{error:?}"),
+        eprintln!(
+            "level=error event=transcript_sync stage=upsert session_id={session_id} error={error:?}"
+        );
+    }
+}
+
+fn record_transcript_error_with_db(
+    db: &Arc<Mutex<Connection>>,
+    session_id: &str,
+    transcript_path: &str,
+    error_message: String,
+    error_stack: String,
+) {
+    let db_guard = match db.lock() {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!(
+                "level=error event=transcript_sync_error_record_failed stage=lock_sqlite session_id={session_id} error={error:?}"
+            );
+            return;
+        }
+    };
+    if let Err(error) = db_guard.execute(
+        "
+        INSERT INTO session_transcripts(
+            session_id,
+            transcript_path,
+            imported_offset_bytes,
+            file_mtime_ms,
+            file_size_bytes,
+            pending_fragment,
+            updated_at_ms,
+            last_error_message,
+            last_error_stack
+        ) VALUES (?1, ?2, 0, 0, 0, '', ?3, ?4, ?5)
+        ON CONFLICT(session_id) DO UPDATE SET
+            transcript_path = excluded.transcript_path,
+            updated_at_ms = excluded.updated_at_ms,
+            last_error_message = excluded.last_error_message,
+            last_error_stack = excluded.last_error_stack
+        ",
+        params![
+            session_id,
+            transcript_path,
+            now_timestamp_ms(),
+            error_message,
+            error_stack
+        ],
+    ) {
+        eprintln!(
+            "level=error event=transcript_sync_error_record_failed stage=upsert_error_state session_id={session_id} error={error:?}"
         );
     }
 }

@@ -1,11 +1,26 @@
 use super::*;
 
-pub(super) fn enqueue_evaluation_for_event(
-    state: &AppState,
+pub(super) fn enqueue_for_worker(
+    eval_config_cache: &Arc<RwLock<EvalConfig>>,
+    eval_counter: &Arc<AtomicU64>,
+    eval_tx: &mpsc::Sender<EvaluationJob>,
+    event: &IncomingEvent,
+) {
+    if let Err(error) = enqueue_impl(eval_config_cache, eval_counter, eval_tx, event) {
+        eprintln!(
+            "level=warn event=eval_enqueue_failed event_id={} error={error:?}",
+            event.event_id
+        );
+    }
+}
+
+fn enqueue_impl(
+    eval_config_cache: &Arc<RwLock<EvalConfig>>,
+    eval_counter: &Arc<AtomicU64>,
+    eval_tx: &mpsc::Sender<EvaluationJob>,
     event: &IncomingEvent,
 ) -> Result<(), ApiError> {
-    let config = state
-        .eval_config_cache
+    let config = eval_config_cache
         .read()
         .map_err(|error| ApiError::Internal(format!("failed to read eval config cache: {error:?}")))?
         .clone();
@@ -15,7 +30,7 @@ pub(super) fn enqueue_evaluation_for_event(
     }
 
     let sampling_rate = config.sampling_rate.max(1);
-    let count = state.eval_counter.fetch_add(1, Ordering::Relaxed) + 1;
+    let count = eval_counter.fetch_add(1, Ordering::Relaxed) + 1;
     if count % sampling_rate as u64 != 0 {
         return Ok(());
     }
@@ -29,7 +44,7 @@ pub(super) fn enqueue_evaluation_for_event(
         retry_count: 0,
     };
 
-    match state.eval_tx.try_send(job) {
+    match eval_tx.try_send(job) {
         Ok(_) => {}
         Err(TrySendError::Full(_)) => {
             return Err(ApiError::QueueFull(format!(

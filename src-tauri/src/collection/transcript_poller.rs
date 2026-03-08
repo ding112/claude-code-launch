@@ -7,7 +7,11 @@ pub(super) fn spawn_transcript_poller(db: Arc<Mutex<Connection>>) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
-            poll_all_transcripts(&db);
+            let db = db.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                poll_all_transcripts(&db);
+            })
+            .await;
         }
     });
 }

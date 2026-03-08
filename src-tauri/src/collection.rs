@@ -40,6 +40,7 @@ pub struct AppState {
     db: Arc<Mutex<Connection>>,
     eval_tx: mpsc::Sender<EvaluationJob>,
     event_tx: mpsc::Sender<IncomingEvent>,
+    #[allow(dead_code)]
     eval_counter: Arc<AtomicU64>,
     eval_config_cache: Arc<RwLock<EvalConfig>>,
 }
@@ -218,6 +219,7 @@ pub struct ApiErrorBody {
     pub retryable: bool,
 }
 
+#[derive(Debug)]
 enum ApiError {
     BadRequest(String),
     Internal(String),
@@ -313,6 +315,14 @@ impl IntoResponse for ApiError {
     }
 }
 
+#[derive(Clone)]
+struct EventWorkerContext {
+    db: Arc<Mutex<Connection>>,
+    eval_tx: mpsc::Sender<EvaluationJob>,
+    eval_counter: Arc<AtomicU64>,
+    eval_config_cache: Arc<RwLock<EvalConfig>>,
+}
+
 fn spawn_event_worker(
     db: Arc<Mutex<Connection>>,
     eval_tx: mpsc::Sender<EvaluationJob>,
@@ -321,17 +331,16 @@ fn spawn_event_worker(
     mut event_rx: mpsc::Receiver<IncomingEvent>,
 ) {
     tokio::spawn(async move {
-        let worker_state = AppState {
+        let ctx = EventWorkerContext {
             db,
             eval_tx,
-            event_tx: mpsc::channel(1).0,
             eval_counter,
             eval_config_cache,
         };
         while let Some(event) = event_rx.recv().await {
-            let state = worker_state.clone();
+            let ctx = ctx.clone();
             tokio::task::spawn_blocking(move || {
-                process_incoming_event(&state, &event);
+                process_incoming_event(&ctx, &event);
             })
             .await
             .ok();
@@ -339,34 +348,39 @@ fn spawn_event_worker(
     });
 }
 
-fn process_incoming_event(state: &AppState, event: &IncomingEvent) {
-    let db = match state.db.lock() {
-        Ok(db) => db,
-        Err(error) => {
-            eprintln!(
-                "level=error event=event_worker_lock_failed event_id={} error={error:?}",
-                event.event_id
-            );
-            return;
+fn process_incoming_event(ctx: &EventWorkerContext, event: &IncomingEvent) {
+    let inserted = {
+        let db = match ctx.db.lock() {
+            Ok(db) => db,
+            Err(error) => {
+                eprintln!(
+                    "level=error event=event_worker_lock_failed event_id={} error={error:?}",
+                    event.event_id
+                );
+                return;
+            }
+        };
+        match db::persist_event(&db, event) {
+            Ok(inserted) => inserted,
+            Err(error) => {
+                eprintln!(
+                    "level=error event=event_persist_failed event_id={} error={error:?}",
+                    event.event_id
+                );
+                return;
+            }
         }
     };
 
-    let inserted = match db::persist_event(&db, event) {
-        Ok(inserted) => inserted,
-        Err(error) => {
-            eprintln!(
-                "level=error event=event_persist_failed event_id={} error={error:?}",
-                event.event_id
-            );
-            return;
-        }
-    };
-    drop(db);
-
-    transcript::sync_transcript_after_event(state, event);
+    transcript::sync_transcript_after_event(&ctx.db, event);
 
     if inserted {
-        let _ = eval_queue::enqueue_evaluation_for_event(state, event);
+        eval_queue::enqueue_for_worker(
+            &ctx.eval_config_cache,
+            &ctx.eval_counter,
+            &ctx.eval_tx,
+            event,
+        );
     }
 }
 
@@ -435,17 +449,23 @@ fn validate_event(event: &IncomingEvent) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn sanitize_json_value(value: &mut Value) {
+fn is_sensitive_key(key_lower: &str) -> bool {
+    key_lower.contains("token")
+        || key_lower.contains("secret")
+        || key_lower.contains("password")
+        || key_lower.contains("credential")
+        || key_lower.contains("private")
+        || key_lower.contains("cert")
+        || key_lower.contains("cookie")
+        || key_lower == "authorization"
+        || (key_lower.contains("key") && key_lower != "keyboard")
+}
+
+pub(crate) fn sanitize_json_value(value: &mut Value) {
     match value {
         Value::Object(map) => {
             for (key, nested) in map.iter_mut() {
-                let key_lower = key.to_ascii_lowercase();
-                if key_lower.contains("token")
-                    || key_lower.contains("secret")
-                    || key_lower.contains("password")
-                    || key_lower == "authorization"
-                    || (key_lower.contains("key") && key_lower != "keyboard")
-                {
+                if is_sensitive_key(&key.to_ascii_lowercase()) {
                     *nested = Value::String("[REDACTED]".to_string());
                     continue;
                 }
