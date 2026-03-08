@@ -4,7 +4,9 @@
       "Bash(openspec list:*)",
       "Bash(openspec status:*)",
       "Bash(git mv:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(git add:*)",
+      "Bash(gh pr:*)"
     ]
   }
 }
