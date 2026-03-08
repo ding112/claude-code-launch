@@ -2,6 +2,7 @@
 import argparse
 import copy
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -153,7 +154,13 @@ def main() -> int:
     args = parse_args()
     config_path = resolve_config_path(args)
     report_script = (repo_root() / "hooks" / "report_event.py").resolve()
-    command = f"python3 {report_script}"
+    if sys.platform == "win32":
+        python_cmd = sys.executable.replace("\\", "/")
+        script_path = str(report_script).replace("\\", "/")
+    else:
+        python_cmd = "python3"
+        script_path = str(report_script)
+    command = f"{python_cmd} {script_path}"
 
     original = load_settings(config_path)
     merged, added_count = merge_target_events(original, command)

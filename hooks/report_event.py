@@ -16,6 +16,11 @@ def now_ms() -> int:
     return int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
 
+def read_stdin_utf8() -> str:
+    raw_bytes = sys.stdin.buffer.read()
+    return raw_bytes.decode("utf-8-sig").strip()
+
+
 def parse_stdin_json(raw_stdin: str) -> dict:
     if not raw_stdin:
         return {}
@@ -133,7 +138,7 @@ def normalize_event_type(raw_event_type: str) -> str:
 
 
 def build_payload() -> dict:
-    raw_stdin = sys.stdin.read().strip()
+    raw_stdin = read_stdin_utf8()
     stdin_data = parse_stdin_json(raw_stdin)
     nested = extract_nested_stdin_json(stdin_data)
 
@@ -205,56 +210,55 @@ def report_with_retry(payload: dict) -> bool:
     max_attempts = int(os.getenv("CODE_AGENT_HOOK_RETRY_ATTEMPTS", "4"))
     backoff_seconds = float(os.getenv("CODE_AGENT_HOOK_BACKOFF_SECONDS", "0.3"))
     timeout_seconds = float(os.getenv("CODE_AGENT_HOOK_TIMEOUT_SECONDS", "3"))
-    verbose_success = parse_bool_env("CODE_AGENT_HOOK_VERBOSE_SUCCESS", False)
+    verbose = parse_bool_env("CODE_AGENT_HOOK_VERBOSE", False)
 
     for attempt in range(max_attempts):
         endpoint = target_endpoints[attempt % len(target_endpoints)]
         try:
             status, body = post_json(endpoint, payload, timeout_seconds)
             if 200 <= status < 300:
-                if verbose_success:
+                if verbose:
                     print(
                         f"[hook] report success attempt={attempt + 1} endpoint={endpoint} status={status}",
                         file=sys.stderr,
                     )
-                    print(body, file=sys.stderr)
                 return True
-            print(
-                f"[hook] non-2xx response attempt={attempt + 1} endpoint={endpoint} status={status}",
-                file=sys.stderr,
-            )
-        except urllib.error.URLError as error:
-            print(
-                f"[hook] network error attempt={attempt + 1} endpoint={endpoint} error={error!r}",
-                file=sys.stderr,
-            )
-            traceback.print_exc(file=sys.stderr)
-        except Exception as error:
-            print(
-                f"[hook] unexpected error attempt={attempt + 1} endpoint={endpoint} error={error!r}",
-                file=sys.stderr,
-            )
-            traceback.print_exc(file=sys.stderr)
+            if verbose:
+                print(
+                    f"[hook] non-2xx response attempt={attempt + 1} endpoint={endpoint} status={status}",
+                    file=sys.stderr,
+                )
+        except Exception:
+            if verbose:
+                print(
+                    f"[hook] error attempt={attempt + 1} endpoint={endpoint}",
+                    file=sys.stderr,
+                )
+                traceback.print_exc(file=sys.stderr)
 
         if attempt < max_attempts - 1:
             delay = backoff_seconds * (2 ** attempt)
-            print(f"[hook] retry after {delay:.2f}s", file=sys.stderr)
             time.sleep(delay)
 
-    print("[hook] report failed after all retry attempts", file=sys.stderr)
+    if verbose:
+        print("[hook] report failed after all retry attempts", file=sys.stderr)
     return False
 
 
 def report_with_background_thread(payload: dict) -> None:
+    timeout_seconds = float(os.getenv("CODE_AGENT_HOOK_TIMEOUT_SECONDS", "3"))
+    max_attempts = int(os.getenv("CODE_AGENT_HOOK_RETRY_ATTEMPTS", "4"))
+    join_timeout = timeout_seconds * max_attempts + 2.0
+
     def worker() -> None:
         try:
             report_with_retry(payload)
         except Exception:
-            print("[hook] background worker crashed", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
+            pass
 
     thread = threading.Thread(target=worker, name="hook-report-worker", daemon=True)
     thread.start()
+    thread.join(timeout=join_timeout)
 
 
 def main() -> int:

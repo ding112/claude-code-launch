@@ -14,25 +14,25 @@ pub(super) async fn post_event(
     super::validate_event(&event)?;
     super::sanitize_json_value(&mut event.payload);
 
-    let db = state
-        .db
-        .lock()
-        .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
-
-    let inserted = db::persist_event(&db, &event)
-        .map_err(|error| ApiError::Internal(format!("failed to persist event: {error:?}")))?;
-    drop(db);
-
-    transcript::sync_transcript_after_event(&state, &event);
-
-    if inserted {
-        eval_queue::enqueue_evaluation_for_event(&state, &event)?;
+    let event_id = event.event_id.clone();
+    match state.event_tx.try_send(event) {
+        Ok(_) => {}
+        Err(TrySendError::Full(_)) => {
+            return Err(ApiError::QueueFull(
+                "event queue is full, please retry later".to_string(),
+            ));
+        }
+        Err(TrySendError::Closed(_)) => {
+            return Err(ApiError::Internal(
+                "event queue is closed".to_string(),
+            ));
+        }
     }
 
     Ok(Json(EventAck {
         accepted: true,
-        duplicate: !inserted,
-        event_id: event.event_id,
+        duplicate: false,
+        event_id,
     }))
 }
 

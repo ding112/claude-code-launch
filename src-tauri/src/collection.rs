@@ -39,6 +39,7 @@ mod transcript_poller;
 pub struct AppState {
     db: Arc<Mutex<Connection>>,
     eval_tx: mpsc::Sender<EvaluationJob>,
+    event_tx: mpsc::Sender<IncomingEvent>,
     eval_counter: Arc<AtomicU64>,
     eval_config_cache: Arc<RwLock<EvalConfig>>,
 }
@@ -52,14 +53,24 @@ impl AppState {
             .map_err(|error| format!("failed to load eval config from sqlite: {error:?}"))?;
         let db = Arc::new(Mutex::new(db));
         let (eval_tx, eval_rx) = mpsc::channel(128);
+        let (event_tx, event_rx) = mpsc::channel::<IncomingEvent>(512);
+        let eval_counter = Arc::new(AtomicU64::new(0));
         let eval_config_cache = Arc::new(RwLock::new(eval_config));
         eval_queue::spawn_evaluation_worker(db.clone(), eval_config_cache.clone(), eval_rx);
         transcript_poller::spawn_transcript_poller(db.clone());
+        spawn_event_worker(
+            db.clone(),
+            eval_tx.clone(),
+            eval_counter.clone(),
+            eval_config_cache.clone(),
+            event_rx,
+        );
 
         Ok(Self {
             db,
             eval_tx,
-            eval_counter: Arc::new(AtomicU64::new(0)),
+            event_tx,
+            eval_counter,
             eval_config_cache,
         })
     }
@@ -73,14 +84,24 @@ impl AppState {
             .map_err(|error| format!("failed to load eval config from sqlite: {error:?}"))?;
         let db = Arc::new(Mutex::new(db));
         let (eval_tx, eval_rx) = mpsc::channel(128);
+        let (event_tx, event_rx) = mpsc::channel::<IncomingEvent>(512);
+        let eval_counter = Arc::new(AtomicU64::new(0));
         let eval_config_cache = Arc::new(RwLock::new(eval_config));
         eval_queue::spawn_evaluation_worker(db.clone(), eval_config_cache.clone(), eval_rx);
         transcript_poller::spawn_transcript_poller(db.clone());
+        spawn_event_worker(
+            db.clone(),
+            eval_tx.clone(),
+            eval_counter.clone(),
+            eval_config_cache.clone(),
+            event_rx,
+        );
 
         Ok(Self {
             db,
             eval_tx,
-            eval_counter: Arc::new(AtomicU64::new(0)),
+            event_tx,
+            eval_counter,
             eval_config_cache,
         })
     }
@@ -292,6 +313,63 @@ impl IntoResponse for ApiError {
     }
 }
 
+fn spawn_event_worker(
+    db: Arc<Mutex<Connection>>,
+    eval_tx: mpsc::Sender<EvaluationJob>,
+    eval_counter: Arc<AtomicU64>,
+    eval_config_cache: Arc<RwLock<EvalConfig>>,
+    mut event_rx: mpsc::Receiver<IncomingEvent>,
+) {
+    tokio::spawn(async move {
+        let worker_state = AppState {
+            db,
+            eval_tx,
+            event_tx: mpsc::channel(1).0,
+            eval_counter,
+            eval_config_cache,
+        };
+        while let Some(event) = event_rx.recv().await {
+            let state = worker_state.clone();
+            tokio::task::spawn_blocking(move || {
+                process_incoming_event(&state, &event);
+            })
+            .await
+            .ok();
+        }
+    });
+}
+
+fn process_incoming_event(state: &AppState, event: &IncomingEvent) {
+    let db = match state.db.lock() {
+        Ok(db) => db,
+        Err(error) => {
+            eprintln!(
+                "level=error event=event_worker_lock_failed event_id={} error={error:?}",
+                event.event_id
+            );
+            return;
+        }
+    };
+
+    let inserted = match db::persist_event(&db, event) {
+        Ok(inserted) => inserted,
+        Err(error) => {
+            eprintln!(
+                "level=error event=event_persist_failed event_id={} error={error:?}",
+                event.event_id
+            );
+            return;
+        }
+    };
+    drop(db);
+
+    transcript::sync_transcript_after_event(state, event);
+
+    if inserted {
+        let _ = eval_queue::enqueue_evaluation_for_event(state, event);
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(parse_allowed_origins())
@@ -408,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn event_insert_is_idempotent() {
         let state = AppState::new_in_memory().expect("in-memory sqlite init should succeed");
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let event = json!({
             "event_id": "evt-1",
@@ -433,6 +511,8 @@ mod tests {
             .expect("first post should complete");
         assert_eq!(first.status(), StatusCode::OK);
 
+        wait_for_event_persisted(&state, "evt-1").await;
+
         let second = app
             .oneshot(
                 Request::builder()
@@ -446,21 +526,23 @@ mod tests {
             .expect("duplicate post should complete");
         assert_eq!(second.status(), StatusCode::OK);
 
-        let response = second
-            .into_body()
-            .collect()
-            .await
-            .expect("response body should be readable")
-            .to_bytes();
-        let json: Value =
-            serde_json::from_slice(&response).expect("duplicate response should be json");
-        assert_eq!(json["duplicate"], true);
+        wait_for_stable_event_count(&state, "session-1", 1).await;
+
+        let db = state.db.lock().expect("db lock should succeed");
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(1) FROM events WHERE event_id = 'evt-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count query should succeed");
+        assert_eq!(count, 1, "duplicate event_id should not create a second row");
     }
 
     #[tokio::test]
     async fn event_query_supports_pagination() {
         let state = AppState::new_in_memory().expect("in-memory sqlite init should succeed");
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         for index in 0..3 {
             let event = json!({
@@ -486,6 +568,8 @@ mod tests {
                 .expect("event post should complete");
             assert_eq!(response.status(), StatusCode::OK);
         }
+
+        wait_for_event_count(&state, "session-2", 3).await;
 
         let response = app
             .oneshot(
@@ -516,7 +600,7 @@ mod tests {
     #[tokio::test]
     async fn event_query_hides_raw_stdin_from_payload() {
         let state = AppState::new_in_memory().expect("in-memory sqlite init should succeed");
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let event = json!({
             "event_id": "evt-raw-stdin",
@@ -544,6 +628,8 @@ mod tests {
             .await
             .expect("event post should complete");
         assert_eq!(post_response.status(), StatusCode::OK);
+
+        wait_for_event_persisted(&state, "evt-raw-stdin").await;
 
         let query_response = app
             .oneshot(
@@ -603,7 +689,7 @@ mod tests {
     #[tokio::test]
     async fn archive_session_hides_old_events_and_keeps_new_events_visible() {
         let state = AppState::new_in_memory().expect("in-memory sqlite init should succeed");
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let old_event_1 = json!({
             "event_id": "evt-archive-old-1",
@@ -637,6 +723,8 @@ mod tests {
                 .expect("event post should complete");
             assert_eq!(response.status(), StatusCode::OK);
         }
+
+        wait_for_event_count(&state, "session-archive", 2).await;
 
         let archive_response = app
             .clone()
@@ -731,6 +819,8 @@ mod tests {
             .expect("new event post should complete");
         assert_eq!(new_event_response.status(), StatusCode::OK);
 
+        wait_for_event_persisted(&state, "evt-archive-new-1").await;
+
         let events_after_new_message = app
             .clone()
             .oneshot(
@@ -819,6 +909,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         post_test_event(&app, "evt-switch-off", "session-switch", json!({"cmd":"ls"})).await;
+        wait_for_event_persisted(&state, "evt-switch-off").await;
         assert_eq!(count_evaluations(&state, "session-switch"), 0);
 
         let enable = EvalConfig {
@@ -847,6 +938,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         post_test_event(&app, "evt-sampling-1", "session-switch", json!({"cmd":"pwd"})).await;
+        wait_for_event_persisted(&state, "evt-sampling-1").await;
         assert_eq!(count_evaluations(&state, "session-switch"), 0);
 
         post_test_event(&app, "evt-sampling-2", "session-switch", json!({"cmd":"whoami"})).await;
@@ -971,6 +1063,8 @@ mod tests {
         )
         .await;
 
+        wait_for_event_persisted(&state, "evt-transcript-append-1").await;
+
         let first = transcript_state(&state, "session-transcript-append")
             .expect("transcript state should exist after first event");
         assert_eq!(first.0, "{\"msg\":\"one\"}\n");
@@ -994,6 +1088,8 @@ mod tests {
         )
         .await;
 
+        wait_for_event_persisted(&state, "evt-transcript-append-2").await;
+
         let second = transcript_state(&state, "session-transcript-append")
             .expect("transcript state should exist after second event");
         assert_eq!(second.0, "{\"msg\":\"one\"}\n{\"msg\":\"two\"}\n");
@@ -1010,6 +1106,8 @@ mod tests {
             }),
         )
         .await;
+
+        wait_for_event_persisted(&state, "evt-transcript-append-3").await;
 
         let third = transcript_state(&state, "session-transcript-append")
             .expect("transcript state should still exist");
@@ -1041,6 +1139,8 @@ mod tests {
         )
         .await;
 
+        wait_for_event_persisted(&state, "evt-transcript-fragment-1").await;
+
         let first = transcript_state(&state, "session-transcript-fragment")
             .expect("transcript state should exist after first event");
         assert_eq!(
@@ -1066,6 +1166,8 @@ mod tests {
             }),
         )
         .await;
+
+        wait_for_event_persisted(&state, "evt-transcript-fragment-2").await;
 
         let second = transcript_state(&state, "session-transcript-fragment")
             .expect("transcript state should exist after second event");
@@ -1095,6 +1197,8 @@ mod tests {
         )
         .await;
 
+        wait_for_event_persisted(&state, "evt-transcript-truncate-1").await;
+
         fs::write(&transcript_path, "{\"msg\":\"after\"}\n")
             .expect("should truncate and rewrite transcript content");
         post_test_event(
@@ -1108,6 +1212,8 @@ mod tests {
             }),
         )
         .await;
+
+        wait_for_event_persisted(&state, "evt-transcript-truncate-2").await;
 
         let state_after = transcript_state(&state, "session-transcript-truncate")
             .expect("transcript state should exist after truncate event");
@@ -1140,12 +1246,15 @@ mod tests {
         )
         .await;
 
+        wait_for_event_persisted(&state, "evt-transcript-error-1").await;
+
         let error = transcript_error(&state, "session-transcript-error")
             .expect("transcript sync error should be recorded");
         assert!(
             error.0.contains("No such file")
                 || error.0.contains("not found")
-                || error.0.contains("cannot find"),
+                || error.0.contains("cannot find")
+                || error.0.contains("os error 2"),
             "error message should include file-not-found details, got={}",
             error.0
         );
@@ -1174,6 +1283,8 @@ mod tests {
             }),
         )
         .await;
+
+        wait_for_event_persisted(&state, "evt-transcript-query-1").await;
 
         let response = app
             .oneshot(
@@ -1259,6 +1370,8 @@ mod tests {
         )
         .await;
 
+        wait_for_event_persisted(&state, "evt-transcript-query-page-1").await;
+
         let first_response = app
             .clone()
             .oneshot(
@@ -1342,16 +1455,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_event_returns_429_when_evaluation_queue_is_full() {
+    async fn post_event_returns_429_when_event_queue_is_full() {
         let db = Connection::open_in_memory().expect("in-memory sqlite init should succeed");
         db::init_schema(&db).expect("schema should initialize");
         let db = Arc::new(Mutex::new(db));
-        let (eval_tx, eval_rx) = mpsc::channel(1);
-        let _keep_receiver_alive = eval_rx;
+        let (eval_tx, _eval_rx) = mpsc::channel(128);
+        let (event_tx, _event_rx) = mpsc::channel::<IncomingEvent>(1);
 
         let state = AppState {
             db,
             eval_tx,
+            event_tx,
             eval_counter: Arc::new(AtomicU64::new(0)),
             eval_config_cache: Arc::new(RwLock::new(EvalConfig::default())),
         };
@@ -1388,6 +1502,60 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).expect("queue full response should be json");
         assert_eq!(json["error_code"], "evaluation_queue_full");
         assert_eq!(json["retryable"], true);
+    }
+
+    async fn wait_for_event_persisted(state: &AppState, event_id: &str) {
+        for _ in 0..80 {
+            let found = {
+                let db = state.db.lock().expect("db lock should succeed");
+                db.query_row(
+                    "SELECT COUNT(1) FROM events WHERE event_id = ?1",
+                    params![event_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+            };
+            if found > 0 {
+                return;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    async fn wait_for_event_count(state: &AppState, session_id: &str, expected_min: u64) {
+        for _ in 0..80 {
+            let count = {
+                let db = state.db.lock().expect("db lock should succeed");
+                db.query_row(
+                    "SELECT COUNT(1) FROM events WHERE session_id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0) as u64
+            };
+            if count >= expected_min {
+                return;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    async fn wait_for_stable_event_count(state: &AppState, session_id: &str, expected: u64) {
+        for _ in 0..80 {
+            let count = {
+                let db = state.db.lock().expect("db lock should succeed");
+                db.query_row(
+                    "SELECT COUNT(1) FROM events WHERE session_id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0) as u64
+            };
+            if count == expected {
+                return;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
     }
 
     async fn post_test_event(app: &Router, event_id: &str, session_id: &str, payload: Value) {
