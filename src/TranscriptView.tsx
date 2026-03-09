@@ -1,5 +1,8 @@
 import { useState, useMemo, type UIEvent } from "react";
 import type { TranscriptLineItem } from "./types";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 
 type ParsedRecord = {
   line_no: number;
@@ -61,7 +64,6 @@ function parseLines(items: TranscriptLineItem[]): ParsedRecord[] {
       if (typeof obj !== "object" || obj === null) {
         return { line_no: item.line_no, raw: item.line_content, parsed: null };
       }
-      // Claude Code format uses `type`, Cursor format uses `role` at top level
       if (!obj.type && typeof (obj as Record<string, unknown>).role === "string") {
         obj.type = (obj as Record<string, unknown>).role as string;
       }
@@ -79,23 +81,24 @@ export default function TranscriptView({ items, loadingMore, hasMore, onScroll }
   const records = useMemo(() => parseLines(items), [items]);
 
   return (
-    <div
-      className="m-0 max-h-[700px] overflow-auto bg-slate-50 border border-black/6 rounded-md p-4 flex flex-col gap-1"
-      onScroll={onScroll}
+    <ScrollArea
+      className="max-h-[700px] rounded-md border bg-muted p-4"
     >
-      {loadingMore && (
-        <p className="text-gray-400 m-0 py-1 text-xs text-center">加载更多中...</p>
-      )}
-      {records.map((rec) => (
-        <RecordRow key={rec.line_no} record={rec} />
-      ))}
-      {!hasMore && (
-        <p className="text-gray-400 m-0 py-1 text-xs text-center">已到最早内容</p>
-      )}
-      {hasMore && !loadingMore && (
-        <p className="text-gray-400 m-0 py-1 text-xs text-center">向下滚动加载更早内容</p>
-      )}
-    </div>
+      <div className="flex flex-col gap-1" onScroll={onScroll}>
+        {loadingMore && (
+          <p className="text-muted-foreground m-0 py-1 text-xs text-center">加载更多中...</p>
+        )}
+        {records.map((rec) => (
+          <RecordRow key={rec.line_no} record={rec} />
+        ))}
+        {!hasMore && (
+          <p className="text-muted-foreground m-0 py-1 text-xs text-center">已到最早内容</p>
+        )}
+        {hasMore && !loadingMore && (
+          <p className="text-muted-foreground m-0 py-1 text-xs text-center">向下滚动加载更早内容</p>
+        )}
+      </div>
+    </ScrollArea>
   );
 }
 
@@ -104,7 +107,7 @@ function RecordRow({ record }: { record: ParsedRecord }) {
     const display = record.raw.endsWith("\n") ? record.raw.slice(0, -1) : record.raw;
     if (!display.trim()) return null;
     return (
-      <div className="font-mono text-xs text-gray-500 whitespace-pre-wrap break-words py-0.5">
+      <div className="font-mono text-xs text-muted-foreground whitespace-pre-wrap break-words py-0.5">
         {display}
       </div>
     );
@@ -131,7 +134,7 @@ function Timestamp({ value }: { value?: string }) {
   if (!value) return null;
   const d = new Date(value);
   const str = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
-  return <span className="text-[10px] text-gray-400 font-mono shrink-0">{str}</span>;
+  return <span className="text-[10px] text-muted-foreground font-mono shrink-0">{str}</span>;
 }
 
 function extractUserText(entry: TranscriptEntry): string {
@@ -153,7 +156,7 @@ function UserMessage({ entry }: { entry: TranscriptEntry }) {
   return (
     <div className="flex justify-end items-start gap-2 my-1">
       <Timestamp value={entry.timestamp} />
-      <div className="max-w-[80%] bg-blue-600 text-white rounded-2xl rounded-tr-md px-4 py-2.5 text-sm whitespace-pre-wrap break-words shadow-sm">
+      <div className="max-w-[80%] bg-primary text-primary-foreground rounded-2xl rounded-tr-md px-4 py-2.5 text-sm whitespace-pre-wrap break-words shadow-sm">
         {text}
       </div>
     </div>
@@ -173,14 +176,14 @@ function AssistantMessage({ entry }: { entry: TranscriptEntry }) {
 
   return (
     <div className="flex justify-start items-start gap-2 my-1">
-      <div className="w-6 h-6 rounded-full bg-gray-800 text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+      <div className="size-6 rounded-full bg-foreground text-background flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
         AI
       </div>
       <div className="max-w-[85%] flex flex-col gap-1.5">
         {model && (
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-400 font-mono">{model}</span>
-            {stopReason && <span className="text-[10px] text-gray-400">· {stopReason}</span>}
+            <span className="text-[10px] text-muted-foreground font-mono">{model}</span>
+            {stopReason && <span className="text-[10px] text-muted-foreground">· {stopReason}</span>}
             <Timestamp value={entry.timestamp} />
           </div>
         )}
@@ -196,7 +199,7 @@ function AssistantBlock({ block }: { block: ContentBlock }) {
   switch (block.type) {
     case "text":
       return (
-        <div className="bg-white border border-black/6 rounded-2xl rounded-tl-md px-4 py-2.5 text-sm whitespace-pre-wrap break-words shadow-sm text-gray-900 leading-relaxed">
+        <div className="bg-card border rounded-2xl rounded-tl-md px-4 py-2.5 text-sm whitespace-pre-wrap break-words shadow-sm leading-relaxed">
           {block.text}
         </div>
       );
@@ -206,8 +209,8 @@ function AssistantBlock({ block }: { block: ContentBlock }) {
       return <ToolUseBlock name={block.name} input={block.input} id={block.id} />;
     case "tool_result":
       return (
-        <div className="bg-gray-50 border border-black/6 rounded-lg px-3 py-2 text-xs font-mono text-gray-600 whitespace-pre-wrap break-words max-h-[200px] overflow-auto">
-          <span className="text-gray-400 text-[10px] uppercase tracking-wider font-semibold">Result</span>
+        <div className="bg-muted border rounded-lg px-3 py-2 text-xs font-mono text-muted-foreground whitespace-pre-wrap break-words max-h-[200px] overflow-auto">
+          <span className="text-muted-foreground text-[10px] uppercase tracking-wider font-semibold">Result</span>
           <div className="mt-1">{typeof block.content === "string" ? block.content : JSON.stringify(block.content)}</div>
         </div>
       );
@@ -217,28 +220,26 @@ function AssistantBlock({ block }: { block: ContentBlock }) {
 }
 
 function ThinkingBlock({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   const preview = text.length > 120 ? `${text.slice(0, 120)}...` : text;
 
   return (
-    <div className="border border-dashed border-purple-200 bg-purple-50/50 rounded-lg px-3 py-2 text-xs">
-      <button
-        type="button"
-        className="flex items-center gap-1.5 text-purple-500 font-medium bg-transparent border-none p-0 cursor-pointer text-xs shadow-none hover:text-purple-700 hover:shadow-none"
-        onClick={() => setExpanded((p) => !p)}
-      >
-        <span className="text-[10px]">{expanded ? "▼" : "▶"}</span>
-        Thinking
-      </button>
-      <div className="mt-1 text-gray-600 whitespace-pre-wrap break-words leading-relaxed">
-        {expanded ? text : preview}
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="border border-dashed border-purple-200 bg-purple-50/50 rounded-lg px-3 py-2 text-xs">
+        <CollapsibleTrigger className="flex items-center gap-1.5 text-purple-500 font-medium bg-transparent border-none p-0 cursor-pointer text-xs shadow-none hover:text-purple-700">
+          <span className="text-[10px]">{open ? "▼" : "▶"}</span>
+          Thinking
+        </CollapsibleTrigger>
+        <div className="mt-1 text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">
+          {open ? text : preview}
+        </div>
       </div>
-    </div>
+    </Collapsible>
   );
 }
 
 function ToolUseBlock({ name, input, id }: { name: string; input: Record<string, unknown>; id: string }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const summary = useMemo(() => {
     if (name === "Read" || name === "Write") return String(input.path ?? input.file_path ?? "");
@@ -252,55 +253,56 @@ function ToolUseBlock({ name, input, id }: { name: string; input: Record<string,
   }, [name, input]);
 
   return (
-    <div className="border border-black/8 bg-amber-50/60 rounded-lg px-3 py-2 text-xs">
-      <button
-        type="button"
-        className="flex items-center gap-1.5 font-medium bg-transparent border-none p-0 cursor-pointer text-xs text-amber-700 shadow-none hover:text-amber-900 hover:shadow-none"
-        onClick={() => setExpanded((p) => !p)}
-      >
-        <span className="text-[10px]">{expanded ? "▼" : "▶"}</span>
-        <span className="font-mono font-semibold">{name}</span>
-        {summary && <span className="text-gray-500 font-normal truncate max-w-[400px]">{summary}</span>}
-      </button>
-      {expanded && (
-        <pre className="mt-2 m-0 overflow-auto max-h-[300px] bg-white rounded-md p-3 font-mono text-[11px] text-gray-700 border border-black/6 whitespace-pre-wrap break-all leading-relaxed">
-          {JSON.stringify(input, null, 2)}
-        </pre>
-      )}
-      <span className="text-[9px] text-gray-400 font-mono">{id}</span>
-    </div>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="border bg-amber-50/60 rounded-lg px-3 py-2 text-xs">
+        <CollapsibleTrigger className="flex items-center gap-1.5 font-medium bg-transparent border-none p-0 cursor-pointer text-xs text-amber-700 shadow-none hover:text-amber-900">
+          <span className="text-[10px]">{open ? "▼" : "▶"}</span>
+          <span className="font-mono font-semibold">{name}</span>
+          {summary && <span className="text-muted-foreground font-normal truncate max-w-[400px]">{summary}</span>}
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <pre className="mt-2 m-0 overflow-auto max-h-[300px] bg-card rounded-md p-3 font-mono text-[11px] border whitespace-pre-wrap break-all leading-relaxed">
+            {JSON.stringify(input, null, 2)}
+          </pre>
+        </CollapsibleContent>
+        <span className="text-[9px] text-muted-foreground font-mono">{id}</span>
+      </div>
+    </Collapsible>
   );
 }
 
 function SystemMessage({ entry }: { entry: TranscriptEntry }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   const subtype = entry.subtype ?? "";
   const level = entry.level ?? "";
 
   const levelColor = level === "suggestion"
-    ? "bg-green-50 border-green-200 text-green-700"
+    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
     : level === "warning"
       ? "bg-yellow-50 border-yellow-200 text-yellow-700"
-      : "bg-gray-100 border-black/6 text-gray-600";
+      : "bg-muted border text-muted-foreground";
 
   return (
-    <div className="flex flex-col items-center my-1">
-      <button
-        type="button"
-        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-medium cursor-pointer bg-transparent shadow-none hover:shadow-none ${levelColor}`}
-        onClick={() => setExpanded((p) => !p)}
-      >
-        <span className="text-[9px]">{expanded ? "▼" : "▶"}</span>
-        ⚙ {subtype || "system"}
-        {entry.hookCount != null && <span className="opacity-60">({entry.hookCount} hooks)</span>}
-        <Timestamp value={entry.timestamp} />
-      </button>
-      {expanded && (
-        <pre className="mt-1 text-[10px] font-mono text-gray-500 bg-white border border-black/6 rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all w-full max-w-[600px]">
-          {JSON.stringify(entry, null, 2)}
-        </pre>
-      )}
-    </div>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="flex flex-col items-center my-1">
+        <CollapsibleTrigger
+          className={cn(
+            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-medium cursor-pointer bg-transparent shadow-none",
+            levelColor
+          )}
+        >
+          <span className="text-[9px]">{open ? "▼" : "▶"}</span>
+          ⚙ {subtype || "system"}
+          {entry.hookCount != null && <span className="opacity-60">({entry.hookCount} hooks)</span>}
+          <Timestamp value={entry.timestamp} />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <pre className="mt-1 text-[10px] font-mono text-muted-foreground bg-card border rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all w-full max-w-[600px]">
+            {JSON.stringify(entry, null, 2)}
+          </pre>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
   );
 }
 
@@ -310,7 +312,7 @@ function ProgressMessage({ entry }: { entry: TranscriptEntry }) {
 
   return (
     <div className="flex justify-center my-0.5">
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-gray-100 border border-black/4 text-[10px] text-gray-500 font-mono">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-muted border text-[10px] text-muted-foreground font-mono">
         ↻ {hookEvent}{hookName && hookName !== hookEvent ? ` · ${hookName}` : ""}
         <Timestamp value={entry.timestamp} />
       </span>
@@ -319,24 +321,22 @@ function ProgressMessage({ entry }: { entry: TranscriptEntry }) {
 }
 
 function GenericMessage({ entry }: { entry: TranscriptEntry }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   return (
-    <div className="flex flex-col items-center my-0.5">
-      <button
-        type="button"
-        className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-gray-50 border border-black/6 text-[10px] text-gray-500 font-mono cursor-pointer shadow-none hover:shadow-none"
-        onClick={() => setExpanded((p) => !p)}
-      >
-        <span className="text-[9px]">{expanded ? "▼" : "▶"}</span>
-        {entry.type}
-        <Timestamp value={entry.timestamp} />
-      </button>
-      {expanded && (
-        <pre className="mt-1 text-[10px] font-mono text-gray-500 bg-white border border-black/6 rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all w-full max-w-[600px]">
-          {JSON.stringify(entry, null, 2)}
-        </pre>
-      )}
-    </div>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="flex flex-col items-center my-0.5">
+        <CollapsibleTrigger className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-muted border text-[10px] text-muted-foreground font-mono cursor-pointer shadow-none">
+          <span className="text-[9px]">{open ? "▼" : "▶"}</span>
+          {entry.type}
+          <Timestamp value={entry.timestamp} />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <pre className="mt-1 text-[10px] font-mono text-muted-foreground bg-card border rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all w-full max-w-[600px]">
+            {JSON.stringify(entry, null, 2)}
+          </pre>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
   );
 }
 

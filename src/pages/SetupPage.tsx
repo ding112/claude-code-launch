@@ -3,6 +3,9 @@ import { usePrereqs } from "../hooks/usePrereqs";
 import { useInstall } from "../hooks/useInstall";
 import { useVerify } from "../hooks/useVerify";
 import { LogPanel } from "../components/LogPanel";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { LogEvent, PrereqResult } from "../types";
 
 type SetupPhase = "idle" | "running" | "success" | "failed";
@@ -82,86 +85,88 @@ export default function SetupPage({
   return (
     <div className="flex flex-col gap-6 p-6 max-w-3xl mx-auto">
       <div>
-        <h2 className="text-xl font-bold text-slate-900 mb-1">
-          Claude Code 安装
-        </h2>
-        <p className="text-sm text-slate-500">
+        <h2 className="text-xl font-bold mb-1">Claude Code 安装</h2>
+        <p className="text-sm text-muted-foreground">
           一键检测环境、安装 Claude Code 并验证
         </p>
       </div>
 
       {prereqData && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-800 mb-3">
-            环境状态
-          </h3>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <span className="text-slate-500">平台: </span>
-              <span className="font-medium">{prereqData.platform}</span>
-            </div>
-            <div>
-              <span className="text-slate-500">Claude Code: </span>
-              <span
-                className={`font-medium ${prereqData.claudeInstalled ? "text-emerald-600" : "text-amber-600"}`}
-              >
-                {prereqData.claudeInstalled
-                  ? prereqData.claudeVersion ?? "已安装"
-                  : "未安装"}
-              </span>
-            </div>
-            {prereqData.items.map((item) => (
-              <div key={item.name}>
-                <span className="text-slate-500">{item.name}: </span>
+        <Card>
+          <CardHeader>
+            <CardTitle>环境状态</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="text-muted-foreground">平台: </span>
+                <span className="font-medium">{prereqData.platform}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Claude Code: </span>
                 <span
-                  className={`font-medium ${item.available ? "text-emerald-600" : item.severity === "blocker" ? "text-rose-600" : "text-amber-600"}`}
+                  className={cn(
+                    "font-medium",
+                    prereqData.claudeInstalled ? "text-emerald-600" : "text-amber-600"
+                  )}
                 >
-                  {item.available ? "可用" : item.message}
+                  {prereqData.claudeInstalled
+                    ? prereqData.claudeVersion ?? "已安装"
+                    : "未安装"}
                 </span>
               </div>
-            ))}
-          </div>
-        </div>
+              {prereqData.items.map((item) => (
+                <div key={item.name}>
+                  <span className="text-muted-foreground">{item.name}: </span>
+                  <span
+                    className={cn(
+                      "font-medium",
+                      item.available
+                        ? "text-emerald-600"
+                        : item.severity === "blocker"
+                          ? "text-destructive"
+                          : "text-amber-600"
+                    )}
+                  >
+                    {item.available ? "可用" : item.message}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className="flex items-center gap-4">
-        <button
-          type="button"
-          disabled={isRunning}
-          onClick={runOneClick}
-          className={`px-6 py-2.5 rounded-lg font-medium text-sm transition-all ${
-            isRunning
-              ? "bg-slate-300 text-slate-500 cursor-not-allowed"
-              : "bg-black text-white hover:bg-slate-800 shadow-sm"
-          }`}
-        >
+        <Button disabled={isRunning} onClick={runOneClick}>
           {isRunning
             ? "安装中..."
             : phase === "success"
               ? "重新安装"
               : "一键安装"}
-        </button>
+        </Button>
 
         {phase === "success" && onInstallComplete && (
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
             onClick={onInstallComplete}
-            className="px-6 py-2.5 rounded-lg font-medium text-sm bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm transition-all"
           >
             进入监控仪表盘
-          </button>
+          </Button>
         )}
       </div>
 
       {statusMessage && (
         <div
-          className={`rounded-lg px-4 py-3 text-sm font-medium ${
+          className={cn(
+            "rounded-lg px-4 py-3 text-sm font-medium border",
             phase === "success"
-              ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
               : phase === "failed"
-                ? "bg-rose-50 text-rose-800 border border-rose-200"
-                : "bg-blue-50 text-blue-800 border border-blue-200"
-          }`}
+                ? "bg-destructive/10 text-destructive border-destructive/20"
+                : "bg-blue-50 text-blue-800 border-blue-200"
+          )}
         >
           {statusMessage}
         </div>
