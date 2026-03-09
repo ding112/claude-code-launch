@@ -1,0 +1,37 @@
+/* Staggered fade-up animation — Tailwind cannot express nth-child delays */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.session-list li {
+  animation: fadeUp 0.4s ease-out forwards;
+  opacity: 0;
+}
+
+.timeline li {
+  animation: fadeUp 0.4s ease-out forwards;
+  opacity: 0;
+}
+
+.session-list li:nth-child(1) { animation-delay: 0.05s; }
+.session-list li:nth-child(2) { animation-delay: 0.10s; }
+.session-list li:nth-child(3) { animation-delay: 0.15s; }
+.session-list li:nth-child(4) { animation-delay: 0.20s; }
+.session-list li:nth-child(5) { animation-delay: 0.25s; }
+.session-list li:nth-child(6) { animation-delay: 0.30s; }
+.session-list li:nth-child(7) { animation-delay: 0.35s; }
+.session-list li:nth-child(8) { animation-delay: 0.40s; }
+
+.timeline li:nth-child(1) { animation-delay: 0.05s; }
+.timeline li:nth-child(2) { animation-delay: 0.10s; }
+.timeline li:nth-child(3) { animation-delay: 0.15s; }
+.timeline li:nth-child(4) { animation-delay: 0.20s; }
+.timeline li:nth-child(5) { animation-delay: 0.25s; }
+.timeline li:nth-child(n+6) { animation-delay: 0.30s; }
