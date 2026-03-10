@@ -1,7 +1,6 @@
-import { useEffect } from "react";
-import TranscriptView from "../TranscriptView";
+import { useEffect, useRef } from "react";
+import TranscriptView, { extractTranscriptTimeRange } from "../TranscriptView";
 import Pager from "../components/Pager";
-import EventItemView from "../components/EventItemView";
 import { useSessions } from "../hooks/useSessions";
 import { useEvents } from "../hooks/useEvents";
 import { useEvaluations } from "../hooks/useEvaluations";
@@ -9,7 +8,6 @@ import { useTranscript } from "../hooks/useTranscript";
 import { riskClass, formatTimestamp } from "../utils";
 import { Card, CardHeader, CardTitle, CardAction, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -31,12 +29,7 @@ export default function SessionsPage() {
 
   const {
     events,
-    eventTypeFilter,
-    setEventTypeFilter,
-    eventsCollapsed,
-    setEventsCollapsed,
     loadEvents,
-    gotoEventPage,
     clearEvents,
   } = useEvents();
 
@@ -57,19 +50,26 @@ export default function SessionsPage() {
     handleTranscriptScroll,
   } = useTranscript(selectedSessionId);
 
+  const prevTimeRangeRef = useRef<string>("");
+
   useEffect(() => {
     void loadSessions();
   }, []);
 
   useEffect(() => {
     if (!selectedSessionId) return;
-    void loadEvents(selectedSessionId, events.page, events.page_size, eventTypeFilter);
     void loadEvaluations(selectedSessionId, evaluations.page, evaluations.page_size);
-  }, [selectedSessionId, eventTypeFilter]);
+  }, [selectedSessionId]);
 
   useEffect(() => {
-    setEventsCollapsed(true);
-  }, [selectedSessionId]);
+    if (!selectedSessionId || !transcript?.items.length) return;
+    const range = extractTranscriptTimeRange(transcript.items);
+    const rangeKey = range ? `${range.minMs}-${range.maxMs}` : "";
+    if (rangeKey && rangeKey !== prevTimeRangeRef.current) {
+      prevTimeRangeRef.current = rangeKey;
+      void loadEvents(selectedSessionId, range!.minMs, range!.maxMs);
+    }
+  }, [selectedSessionId, transcript]);
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6 flex-1 min-h-0 items-stretch p-6">
@@ -141,16 +141,8 @@ export default function SessionsPage() {
       <Card className="lg:overflow-y-auto min-w-0 overflow-x-hidden">
         <CardHeader>
           <CardTitle>Session 详情</CardTitle>
-          <CardAction className="flex items-center gap-3">
-            <label htmlFor="eventType" className="text-[13px] text-muted-foreground m-0 font-medium">Filter</label>
-            <Input
-              id="eventType"
-              className="w-[140px]"
-              value={eventTypeFilter}
-              onChange={(e) => setEventTypeFilter(e.target.value)}
-              placeholder="e.g. tool.call"
-            />
-            {selectedSession ? (
+          {selectedSession ? (
+            <CardAction>
               <Button
                 variant="outline"
                 size="sm"
@@ -160,8 +152,8 @@ export default function SessionsPage() {
               >
                 {archiving ? "归档中..." : "归档"}
               </Button>
-            ) : null}
-          </CardAction>
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent>
           {sessionMessage ? <p className="text-muted-foreground">{sessionMessage}</p> : null}
@@ -219,6 +211,7 @@ export default function SessionsPage() {
                       {!transcriptLoading && transcript?.items.length ? (
                         <TranscriptView
                           items={transcript.items}
+                          events={events}
                           loadingMore={transcriptLoadingMore}
                           hasMore={transcript.has_more}
                           onScroll={handleTranscriptScroll}
@@ -233,81 +226,51 @@ export default function SessionsPage() {
                   </div>
                 </Collapsible>
 
-                <div className="flex flex-col gap-6 min-w-0">
-                  <Collapsible
-                    open={!eventsCollapsed}
-                    onOpenChange={(open) => setEventsCollapsed(!open)}
-                  >
-                    <div className="flex flex-col gap-3">
-                      <CollapsibleTrigger className="w-full flex items-center justify-between gap-3 p-0 border-none bg-transparent text-inherit cursor-pointer shadow-none text-left hover:shadow-none">
-                        <h4 className="m-0 flex items-center gap-1.5">
-                          <span className="text-[10px] transition-transform duration-150 opacity-70">{eventsCollapsed ? "▶" : "▼"}</span>
-                          事件时间线
-                        </h4>
-                        <span className="text-muted-foreground">total: {events.total}</span>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <ul className="timeline list-none m-0 p-0 flex flex-col gap-4">
-                          {events.items.map((eventItem) => (
-                            <EventItemView key={eventItem.event_id} eventItem={eventItem} />
-                          ))}
-                        </ul>
-                        <Pager
-                          page={events.page}
-                          pageSize={events.page_size}
-                          total={events.total}
-                          onPageChange={(p) => gotoEventPage(selectedSessionId, p)}
-                        />
-                      </CollapsibleContent>
-                    </div>
-                  </Collapsible>
-
-                  <div>
-                    <h4>评估结果</h4>
-                    <ul className="timeline list-none m-0 p-0 flex flex-col gap-4">
-                      {evaluations.items.map((item) => (
-                        <li key={item.evaluation_id} className="list-none">
-                          <Card size="sm">
-                            <CardContent className="flex flex-col gap-3">
-                              <div className="flex justify-between items-center pb-3 border-b">
-                                <Badge variant="outline" className="font-mono font-semibold">{item.status}</Badge>
-                                <span className="text-xs text-muted-foreground font-mono">{formatTimestamp(item.created_at_ms)}</span>
+                <div className="min-w-0">
+                  <h4>评估结果</h4>
+                  <ul className="timeline list-none m-0 p-0 flex flex-col gap-4">
+                    {evaluations.items.map((item) => (
+                      <li key={item.evaluation_id} className="list-none">
+                        <Card size="sm">
+                          <CardContent className="flex flex-col gap-3">
+                            <div className="flex justify-between items-center pb-3 border-b">
+                              <Badge variant="outline" className="font-mono font-semibold">{item.status}</Badge>
+                              <span className="text-xs text-muted-foreground font-mono">{formatTimestamp(item.created_at_ms)}</span>
+                            </div>
+                            <div className="flex flex-col gap-2 bg-muted px-4 py-3 rounded-md">
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="text-muted-foreground font-medium min-w-[80px]">Risk:</span>
+                                <span className={cn("font-semibold inline-flex px-2 py-0.5 rounded text-xs uppercase", riskClass(item.risk_level))}>{item.risk_level}</span>
+                                <span className="text-muted-foreground text-[13px]">({item.risk_category})</span>
                               </div>
-                              <div className="flex flex-col gap-2 bg-muted px-4 py-3 rounded-md">
-                                <div className="flex items-center gap-2 text-sm">
-                                  <span className="text-muted-foreground font-medium min-w-[80px]">Risk:</span>
-                                  <span className={cn("font-semibold inline-flex px-2 py-0.5 rounded text-xs uppercase", riskClass(item.risk_level))}>{item.risk_level}</span>
-                                  <span className="text-muted-foreground text-[13px]">({item.risk_category})</span>
-                                </div>
-                                <div className="flex items-center gap-2 text-sm">
-                                  <span className="text-muted-foreground font-medium min-w-[80px]">Efficiency:</span>
-                                  <span className="font-semibold">{item.efficiency_level}</span>
-                                </div>
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="text-muted-foreground font-medium min-w-[80px]">Efficiency:</span>
+                                <span className="font-semibold">{item.efficiency_level}</span>
                               </div>
-                              {item.suggestion && (
-                                <div className="flex flex-col gap-1.5">
-                                  <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Suggestion</div>
-                                  <p className="m-0 text-sm text-emerald-800 leading-relaxed p-3 bg-emerald-50 border border-emerald-200 rounded-md">{item.suggestion}</p>
-                                </div>
-                              )}
-                              {item.error_message && (
-                                <div className="flex flex-col gap-1.5">
-                                  <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Error</div>
-                                  <pre className="m-0 overflow-auto max-h-[400px] bg-destructive/10 text-destructive rounded-md p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">{item.error_message}</pre>
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        </li>
-                      ))}
-                    </ul>
-                    <Pager
-                      page={evaluations.page}
-                      pageSize={evaluations.page_size}
-                      total={evaluations.total}
-                      onPageChange={(p) => gotoEvaluationPage(selectedSessionId, p)}
-                    />
-                  </div>
+                            </div>
+                            {item.suggestion && (
+                              <div className="flex flex-col gap-1.5">
+                                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Suggestion</div>
+                                <p className="m-0 text-sm text-emerald-800 leading-relaxed p-3 bg-emerald-50 border border-emerald-200 rounded-md">{item.suggestion}</p>
+                              </div>
+                            )}
+                            {item.error_message && (
+                              <div className="flex flex-col gap-1.5">
+                                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Error</div>
+                                <pre className="m-0 overflow-auto max-h-[400px] bg-destructive/10 text-destructive rounded-md p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">{item.error_message}</pre>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </li>
+                    ))}
+                  </ul>
+                  <Pager
+                    page={evaluations.page}
+                    pageSize={evaluations.page_size}
+                    total={evaluations.total}
+                    onPageChange={(p) => gotoEvaluationPage(selectedSessionId, p)}
+                  />
                 </div>
               </div>
             </>

@@ -1,6 +1,5 @@
 import { useState, useMemo, type UIEvent } from "react";
-import type { TranscriptLineItem } from "./types";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import type { TranscriptLineItem, EventItem } from "./types";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { truncate } from "./utils";
@@ -51,10 +50,15 @@ type ProgressData = {
 
 type TranscriptViewProps = {
   items: TranscriptLineItem[];
+  events: EventItem[];
   loadingMore: boolean;
   hasMore: boolean;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
 };
+
+type MergedTimelineItem =
+  | { kind: "transcript"; record: ParsedRecord; timestampMs: number }
+  | { kind: "event"; event: EventItem; timestampMs: number };
 
 function parseLines(items: TranscriptLineItem[]): ParsedRecord[] {
   return items.map((item) => {
@@ -78,28 +82,75 @@ function parseLines(items: TranscriptLineItem[]): ParsedRecord[] {
   });
 }
 
-export default function TranscriptView({ items, loadingMore, hasMore, onScroll }: TranscriptViewProps) {
+function mergeTimeline(records: ParsedRecord[], events: EventItem[]): MergedTimelineItem[] {
+  let lastTs = 0;
+  const tsRecords: MergedTimelineItem[] = records.map((r) => {
+    if (r.parsed?.timestamp) {
+      const ms = new Date(r.parsed.timestamp).getTime();
+      if (!Number.isNaN(ms)) lastTs = ms;
+    }
+    return { kind: "transcript", record: r, timestampMs: lastTs };
+  });
+
+  const tsEvents: MergedTimelineItem[] = events.map((e) => ({
+    kind: "event",
+    event: e,
+    timestampMs: e.created_at_ms,
+  }));
+
+  return [...tsRecords, ...tsEvents].sort((a, b) => {
+    if (a.timestampMs !== b.timestampMs) return a.timestampMs - b.timestampMs;
+    return a.kind === "transcript" ? -1 : 1;
+  });
+}
+
+export function extractTranscriptTimeRange(items: TranscriptLineItem[]): { minMs: number; maxMs: number } | null {
+  let minMs = Infinity;
+  let maxMs = -Infinity;
+  for (const item of items) {
+    const trimmed = item.line_content.trim();
+    if (!trimmed) continue;
+    try {
+      const obj = JSON.parse(trimmed) as { timestamp?: string };
+      if (obj.timestamp) {
+        const ms = new Date(obj.timestamp).getTime();
+        if (!Number.isNaN(ms)) {
+          if (ms < minMs) minMs = ms;
+          if (ms > maxMs) maxMs = ms;
+        }
+      }
+    } catch { /* skip unparseable lines */ }
+  }
+  if (minMs === Infinity || maxMs === -Infinity) return null;
+  return { minMs, maxMs };
+}
+
+export default function TranscriptView({ items, events, loadingMore, hasMore, onScroll }: TranscriptViewProps) {
   const records = useMemo(() => parseLines(items), [items]);
+  const merged = useMemo(() => mergeTimeline(records, events), [records, events]);
 
   return (
-    <ScrollArea
-      className="max-h-[700px] rounded-md border bg-muted p-4"
+    <div
+      className="max-h-[700px] overflow-y-auto rounded-md border bg-muted p-4 flex flex-col gap-1"
+      onScroll={onScroll}
     >
-      <div className="flex flex-col gap-1" onScroll={onScroll}>
-        {loadingMore && (
-          <p className="text-muted-foreground m-0 py-1 text-xs text-center">加载更多中...</p>
-        )}
-        {records.map((rec) => (
-          <RecordRow key={rec.line_no} record={rec} />
-        ))}
-        {!hasMore && (
-          <p className="text-muted-foreground m-0 py-1 text-xs text-center">已到最早内容</p>
-        )}
-        {hasMore && !loadingMore && (
-          <p className="text-muted-foreground m-0 py-1 text-xs text-center">向下滚动加载更早内容</p>
-        )}
-      </div>
-    </ScrollArea>
+      {loadingMore && (
+        <p className="text-muted-foreground m-0 py-1 text-xs text-center">加载更多中...</p>
+      )}
+      {merged.map((item) =>
+        item.kind === "transcript" ? (
+          <RecordRow key={`t-${item.record.line_no}`} record={item.record} />
+        ) : (
+          <EventBubble key={`e-${item.event.event_id}`} event={item.event} />
+        ),
+      )}
+      {!hasMore && (
+        <p className="text-muted-foreground m-0 py-1 text-xs text-center">已到最早内容</p>
+      )}
+      {hasMore && !loadingMore && (
+        <p className="text-muted-foreground m-0 py-1 text-xs text-center">向下滚动加载更早内容</p>
+      )}
+    </div>
   );
 }
 
@@ -334,6 +385,34 @@ function GenericMessage({ entry }: { entry: TranscriptEntry }) {
         <CollapsibleContent>
           <pre className="mt-1 text-[10px] font-mono text-muted-foreground bg-card border rounded-md p-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-all w-full max-w-[600px]">
             {JSON.stringify(entry, null, 2)}
+          </pre>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
+
+function EventBubble({ event }: { event: EventItem }) {
+  const [open, setOpen] = useState(false);
+  const d = new Date(event.created_at_ms);
+  const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="flex flex-col items-center my-1">
+        <CollapsibleTrigger
+          className={cn(
+            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-medium cursor-pointer bg-transparent shadow-none",
+            "bg-sky-50 border-sky-200 text-sky-700",
+          )}
+        >
+          <span className="text-[9px]">{open ? "▼" : "▶"}</span>
+          ⚡ {event.event_type}
+          <span className="text-[10px] text-sky-500 font-mono shrink-0">{timeStr}</span>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <pre className="mt-1 text-[10px] font-mono text-muted-foreground bg-card border rounded-md p-2 max-h-[300px] overflow-auto whitespace-pre-wrap break-all w-full max-w-[600px]">
+            {JSON.stringify(event.payload, null, 2)}
           </pre>
         </CollapsibleContent>
       </div>
