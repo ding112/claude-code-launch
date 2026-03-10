@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import AddCommandInput from "../components/AddCommandInput";
 import { useEvalSettings } from "../hooks/useEvalSettings";
 import { useHooksConfig } from "../hooks/useHooksConfig";
@@ -35,6 +35,11 @@ export default function SettingsPage() {
   } = useHooksConfig();
 
   const [addEventValue, setAddEventValue] = useState("");
+
+  const availableEvents = useMemo(
+    () => KNOWN_EVENTS.filter((e) => !hooksData.events[e]),
+    [hooksData.events]
+  );
 
   useEffect(() => {
     void loadSettings();
@@ -238,7 +243,7 @@ export default function SettingsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {KNOWN_EVENTS.filter((e) => !hooksData.events[e]).map((eventName) => (
+                        {availableEvents.map((eventName) => (
                           <SelectItem key={eventName} value={eventName}>{eventName}</SelectItem>
                         ))}
                       </SelectGroup>

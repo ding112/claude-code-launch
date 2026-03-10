@@ -2,6 +2,7 @@ import type { LogEvent } from "../types";
 import { Card, CardHeader, CardTitle, CardAction, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { useMemo } from "react";
 
 function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString();
@@ -25,12 +26,15 @@ function sanitizeForDisplay(input: string) {
 }
 
 export function LogPanel({ logs }: { logs: LogEvent[] }) {
-  const allText = logs
-    .map((item) => {
-      const rawMessage = item.raw && item.raw.length > 0 ? item.raw : item.message;
-      return `[${formatTime(item.timestamp)}] [${item.level}] ${rawMessage}`;
-    })
-    .join("\n");
+  const allText = useMemo(
+    () => logs
+      .map((item) => {
+        const rawMessage = item.raw && item.raw.length > 0 ? item.raw : item.message;
+        return `[${formatTime(item.timestamp)}] [${item.level}] ${rawMessage}`;
+      })
+      .join("\n"),
+    [logs]
+  );
 
   return (
     <Card>

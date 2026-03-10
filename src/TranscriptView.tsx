@@ -3,6 +3,7 @@ import type { TranscriptLineItem } from "./types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { truncate } from "./utils";
 
 type ParsedRecord = {
   line_no: number;
@@ -338,8 +339,4 @@ function GenericMessage({ entry }: { entry: TranscriptEntry }) {
       </div>
     </Collapsible>
   );
-}
-
-function truncate(str: string, max: number): string {
-  return str.length > max ? `${str.slice(0, max)}…` : str;
 }
