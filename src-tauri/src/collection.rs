@@ -46,9 +46,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(db_path: &str) -> Result<Self, String> {
-        let db = Connection::open(db_path)
-            .map_err(|error| format!("failed to open sqlite db at {db_path}: {error:?}"))?;
+    fn init_from_connection(db: Connection) -> Result<Self, String> {
         db::init_schema(&db).map_err(|error| format!("failed to init sqlite schema: {error:?}"))?;
         let eval_config = db::load_eval_config(&db)
             .map_err(|error| format!("failed to load eval config from sqlite: {error:?}"))?;
@@ -76,35 +74,17 @@ impl AppState {
         })
     }
 
+    pub fn new(db_path: &str) -> Result<Self, String> {
+        let db = Connection::open(db_path)
+            .map_err(|error| format!("failed to open sqlite db at {db_path}: {error:?}"))?;
+        Self::init_from_connection(db)
+    }
+
     #[cfg(test)]
     fn new_in_memory() -> Result<Self, String> {
         let db = Connection::open_in_memory()
             .map_err(|error| format!("failed to open sqlite in-memory db: {error:?}"))?;
-        db::init_schema(&db).map_err(|error| format!("failed to init sqlite schema: {error:?}"))?;
-        let eval_config = db::load_eval_config(&db)
-            .map_err(|error| format!("failed to load eval config from sqlite: {error:?}"))?;
-        let db = Arc::new(Mutex::new(db));
-        let (eval_tx, eval_rx) = mpsc::channel(128);
-        let (event_tx, event_rx) = mpsc::channel::<IncomingEvent>(512);
-        let eval_counter = Arc::new(AtomicU64::new(0));
-        let eval_config_cache = Arc::new(RwLock::new(eval_config));
-        eval_queue::spawn_evaluation_worker(db.clone(), eval_config_cache.clone(), eval_rx);
-        transcript_poller::spawn_transcript_poller(db.clone());
-        spawn_event_worker(
-            db.clone(),
-            eval_tx.clone(),
-            eval_counter.clone(),
-            eval_config_cache.clone(),
-            event_rx,
-        );
-
-        Ok(Self {
-            db,
-            eval_tx,
-            event_tx,
-            eval_counter,
-            eval_config_cache,
-        })
+        Self::init_from_connection(db)
     }
 }
 
@@ -127,7 +107,6 @@ pub struct IncomingEvent {
 #[derive(Debug, Serialize)]
 pub struct EventAck {
     pub accepted: bool,
-    pub duplicate: bool,
     pub event_id: String,
 }
 

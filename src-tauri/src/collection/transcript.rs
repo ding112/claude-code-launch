@@ -165,6 +165,12 @@ pub(super) fn validate_transcript_path(raw: &str) -> Option<String> {
         return Some(canonical.to_string_lossy().to_string());
     }
 
+    if let Some(home) = dirs::home_dir() {
+        if !path.starts_with(&home) {
+            eprintln!("level=warn event=transcript_path_rejected reason=outside_home_dir_unresolved path={raw}");
+            return None;
+        }
+    }
     Some(raw.to_string())
 }
 

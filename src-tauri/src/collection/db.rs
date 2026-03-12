@@ -4,6 +4,7 @@ pub(super) fn init_schema(db: &Connection) -> rusqlite::Result<()> {
     db.execute_batch(
         "
         PRAGMA journal_mode = WAL;
+        PRAGMA busy_timeout = 5000;
         CREATE TABLE IF NOT EXISTS sessions (
             session_id TEXT PRIMARY KEY,
             project_name TEXT NOT NULL,
@@ -245,6 +246,15 @@ fn ensure_session_transcript_columns(db: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+fn assert_safe_sql_identifier(s: &str, label: &str) {
+    assert!(
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\''),
+        "{label} contains unsafe characters: {s}"
+    );
+}
+
 fn add_column_if_missing(
     db: &Connection,
     table_name: &str,
@@ -252,6 +262,8 @@ fn add_column_if_missing(
     column: &str,
     schema: &str,
 ) -> rusqlite::Result<()> {
+    assert_safe_sql_identifier(table_name, "table_name");
+    assert_safe_sql_identifier(column, "column");
     if columns.iter().any(|existing| existing == column) {
         return Ok(());
     }
