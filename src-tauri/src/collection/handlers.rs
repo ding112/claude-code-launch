@@ -31,7 +31,6 @@ pub(super) async fn post_event(
 
     Ok(Json(EventAck {
         accepted: true,
-        duplicate: false,
         event_id,
     }))
 }

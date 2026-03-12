@@ -84,6 +84,8 @@ fn load_all_sync_states(
         SELECT session_id, transcript_path, imported_offset_bytes, file_mtime_ms, pending_fragment
         FROM session_transcripts
         WHERE transcript_path != ''
+        ORDER BY updated_at_ms DESC
+        LIMIT 100
         ",
     )?;
     let mut rows = statement.query([])?;

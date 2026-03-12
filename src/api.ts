@@ -8,8 +8,16 @@ import type {
   HooksInitResult,
 } from "./types";
 
+async function assertOk(response: Response): Promise<Response> {
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`API error ${response.status}: ${text}`);
+  }
+  return response;
+}
+
 export async function fetchSessions(): Promise<SessionItem[]> {
-  const response = await fetch(`${API_BASE}/sessions`);
+  const response = await assertOk(await fetch(`${API_BASE}/sessions`));
   return (await response.json()) as SessionItem[];
 }
 
@@ -27,7 +35,7 @@ export async function fetchEvents(
   if (eventType.trim()) {
     params.set("event_type", eventType.trim());
   }
-  const response = await fetch(`${API_BASE}/events?${params.toString()}`);
+  const response = await assertOk(await fetch(`${API_BASE}/events?${params.toString()}`));
   return (await response.json()) as EventResponse;
 }
 
@@ -41,7 +49,7 @@ export async function fetchEvaluations(
     page: String(page),
     page_size: String(pageSize),
   });
-  const response = await fetch(`${API_BASE}/evaluations?${params.toString()}`);
+  const response = await assertOk(await fetch(`${API_BASE}/evaluations?${params.toString()}`));
   return (await response.json()) as EvaluationResponse;
 }
 
@@ -61,7 +69,7 @@ export async function fetchTranscript(
 }
 
 export async function fetchSettings(): Promise<EvalSettings> {
-  const response = await fetch(`${API_BASE}/settings`);
+  const response = await assertOk(await fetch(`${API_BASE}/settings`));
   return (await response.json()) as EvalSettings;
 }
 
