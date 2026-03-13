@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import type { SessionItem } from "../types";
-import { fetchSessions, archiveSession } from "../api";
+import type { SessionItem, DiscoverResult } from "../types";
+import { fetchSessions, archiveSession, discoverSessions } from "../api";
 
 export function useSessions() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
   const [sessionMessage, setSessionMessage] = useState<string>("");
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
 
@@ -94,6 +95,24 @@ export function useSessions() {
     }
   };
 
+  const runDiscover = async (): Promise<DiscoverResult | null> => {
+    setDiscovering(true);
+    setSessionMessage("");
+    try {
+      const result = await discoverSessions();
+      await loadSessions();
+      setSessionMessage(
+        `扫描 ${result.scanned} 个历史 session，导入 ${result.imported}，更新 ${result.updated}${result.errors > 0 ? `，错误 ${result.errors}` : ""}。`,
+      );
+      return result;
+    } catch {
+      setSessionMessage("发现历史 session 失败，请稍后重试。");
+      return null;
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
   return {
     sessions,
     selectedSessionId,
@@ -103,9 +122,11 @@ export function useSessions() {
     collapsedProjects,
     loading,
     archiving,
+    discovering,
     sessionMessage,
     toggleProject,
     loadSessions,
     archiveSelectedSession,
+    runDiscover,
   };
 }

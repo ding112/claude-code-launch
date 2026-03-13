@@ -56,6 +56,22 @@ export type SessionItem = {
   last_active_at_ms: number;
   latest_risk_level: string;
   evaluation_count: number;
+  first_prompt: string;
+  duration_minutes: number;
+  input_tokens: number;
+  output_tokens: number;
+  goal: string;
+  summary: string;
+  outcome: string;
+  source: string;
+};
+
+export type DiscoverResult = {
+  accepted: boolean;
+  scanned: number;
+  imported: number;
+  updated: number;
+  errors: number;
 };
 
 export type EventItem = {

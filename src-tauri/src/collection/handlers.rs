@@ -205,14 +205,20 @@ pub(super) async fn get_sessions(State(state): State<AppState>) -> Result<Json<V
                 SELECT COUNT(1)
                 FROM evaluations ev2
                 WHERE ev2.session_id = s.session_id
-            ), 0) AS evaluation_count
+            ), 0) AS evaluation_count,
+            s.first_prompt,
+            s.duration_minutes,
+            s.input_tokens,
+            s.output_tokens,
+            s.goal,
+            s.summary,
+            s.outcome,
+            s.source
         FROM sessions s
         WHERE EXISTS (
-            SELECT 1
-            FROM events e
-            WHERE e.session_id = s.session_id
-              AND e.is_archived = 0
-        )
+            SELECT 1 FROM events e
+            WHERE e.session_id = s.session_id AND e.is_archived = 0
+        ) OR s.source = 'discovery'
         ORDER BY s.last_active_at_ms DESC
     ";
 
@@ -247,10 +253,46 @@ pub(super) async fn get_sessions(State(state): State<AppState>) -> Result<Json<V
             evaluation_count: row.get::<_, i64>(5).map_err(|error| {
                 ApiError::Internal(format!("failed to decode evaluation_count: {error:?}"))
             })? as u64,
+            first_prompt: row.get(6).map_err(|error| {
+                ApiError::Internal(format!("failed to decode first_prompt: {error:?}"))
+            })?,
+            duration_minutes: row.get(7).map_err(|error| {
+                ApiError::Internal(format!("failed to decode duration_minutes: {error:?}"))
+            })?,
+            input_tokens: row.get(8).map_err(|error| {
+                ApiError::Internal(format!("failed to decode input_tokens: {error:?}"))
+            })?,
+            output_tokens: row.get(9).map_err(|error| {
+                ApiError::Internal(format!("failed to decode output_tokens: {error:?}"))
+            })?,
+            goal: row.get(10).map_err(|error| {
+                ApiError::Internal(format!("failed to decode goal: {error:?}"))
+            })?,
+            summary: row.get(11).map_err(|error| {
+                ApiError::Internal(format!("failed to decode summary: {error:?}"))
+            })?,
+            outcome: row.get(12).map_err(|error| {
+                ApiError::Internal(format!("failed to decode outcome: {error:?}"))
+            })?,
+            source: row.get(13).map_err(|error| {
+                ApiError::Internal(format!("failed to decode source: {error:?}"))
+            })?,
         });
     }
 
     Ok(Json(items))
+}
+
+pub(super) async fn discover_sessions(
+    State(state): State<AppState>,
+) -> Result<Json<discovery::DiscoverResult>, ApiError> {
+    let discovered = discovery::scan_session_meta();
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
+    let result = discovery::import_discovered_sessions(&mut db, &discovered);
+    Ok(Json(result))
 }
 
 pub(super) async fn get_transcript(

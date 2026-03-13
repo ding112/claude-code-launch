@@ -1,6 +1,7 @@
 import { API_BASE, TRANSCRIPT_PAGE_SIZE } from "./constants";
 import type {
   SessionItem,
+  DiscoverResult,
   EventResponse,
   EvaluationResponse,
   EvalSettings,
@@ -111,6 +112,16 @@ export async function initHooksApi(): Promise<HooksInitResult | null> {
   });
   if (!response.ok) return null;
   return (await response.json()) as HooksInitResult;
+}
+
+export async function discoverSessions(): Promise<DiscoverResult> {
+  const response = await assertOk(
+    await fetch(`${API_BASE}/sessions/discover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  return (await response.json()) as DiscoverResult;
 }
 
 export async function archiveSession(sessionId: string): Promise<boolean> {

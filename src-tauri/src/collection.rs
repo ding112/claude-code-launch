@@ -30,6 +30,8 @@ mod eval_queue;
 mod handlers;
 #[path = "collection/hooks.rs"]
 mod hooks;
+#[path = "collection/discovery.rs"]
+mod discovery;
 #[path = "collection/transcript.rs"]
 mod transcript;
 #[path = "collection/transcript_poller.rs"]
@@ -193,6 +195,14 @@ pub struct SessionItem {
     pub last_active_at_ms: i64,
     pub latest_risk_level: String,
     pub evaluation_count: u64,
+    pub first_prompt: String,
+    pub duration_minutes: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub goal: String,
+    pub summary: String,
+    pub outcome: String,
+    pub source: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -383,6 +393,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/transcripts", get(handlers::get_transcript))
         .route("/transcripts/sync", post(handlers::sync_transcript))
         .route("/sessions/archive", post(handlers::archive_session))
+        .route("/sessions/discover", post(handlers::discover_sessions))
         .route("/events", post(handlers::post_event).get(handlers::get_events))
         .route("/settings", get(handlers::get_settings).post(handlers::save_settings))
         .route("/evaluations", get(handlers::get_evaluations))

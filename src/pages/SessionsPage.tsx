@@ -13,6 +13,12 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 export default function SessionsPage() {
   const {
     selectedSessionId,
@@ -22,10 +28,12 @@ export default function SessionsPage() {
     collapsedProjects,
     loading,
     archiving,
+    discovering,
     sessionMessage,
     toggleProject,
     loadSessions,
     archiveSelectedSession,
+    runDiscover,
   } = useSessions();
 
   const {
@@ -75,9 +83,19 @@ export default function SessionsPage() {
         <CardHeader>
           <CardTitle>Session 列表</CardTitle>
           <CardAction>
-            <Button variant="outline" size="sm" onClick={() => void loadSessions()}>
-              刷新
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={discovering}
+                onClick={() => void runDiscover()}
+              >
+                {discovering ? "扫描中..." : "发现历史"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void loadSessions()}>
+                刷新
+              </Button>
+            </div>
           </CardAction>
         </CardHeader>
         <CardContent>
@@ -112,17 +130,33 @@ export default function SessionsPage() {
                               )}
                               onClick={() => setSelectedSessionId(session.session_id)}
                             >
-                              <span className="text-[15px] font-semibold truncate">{session.session_id}</span>
-                              {session.agent_type && (
-                                <Badge variant="secondary" className="w-fit text-[11px]">
-                                  {session.agent_type}
-                                </Badge>
-                              )}
-                              <span className="text-[13px] text-muted-foreground">Last Active: {formatTimestamp(session.last_active_at_ms)}</span>
-                              <span className={cn("font-medium inline-block px-2 py-0.5 rounded-full text-xs mt-1 w-fit border", riskClass(session.latest_risk_level))}>
-                                Risk: {session.latest_risk_level}
+                              <span className="text-[13px] font-semibold truncate leading-snug">
+                                {session.first_prompt || session.session_id.slice(0, 12)}
                               </span>
-                              <span className="text-[13px] text-muted-foreground">Evaluations: {session.evaluation_count}</span>
+                              {session.summary ? (
+                                <span className="text-[12px] text-muted-foreground line-clamp-2 leading-snug">{session.summary}</span>
+                              ) : null}
+                              <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                {session.agent_type && (
+                                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                    {session.agent_type}
+                                  </Badge>
+                                )}
+                                {session.source === "discovery" && (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                    历史
+                                  </Badge>
+                                )}
+                                {session.duration_minutes > 0 && (
+                                  <span className="text-[11px] text-muted-foreground">{session.duration_minutes}min</span>
+                                )}
+                                {(session.input_tokens > 0 || session.output_tokens > 0) && (
+                                  <span className="text-[11px] text-muted-foreground font-mono">
+                                    {formatTokens(session.input_tokens)}/{formatTokens(session.output_tokens)}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[12px] text-muted-foreground">{formatTimestamp(session.last_active_at_ms)}</span>
                             </button>
                           </li>
                         ))}
@@ -158,7 +192,7 @@ export default function SessionsPage() {
 
           {selectedSession ? (
             <>
-              <div className="mb-6">
+              <div className="mb-6 flex flex-col gap-3">
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="text-2xl font-bold tracking-tight m-0">{selectedSession.project_name}</h3>
                   {selectedSession.agent_type && (
@@ -166,8 +200,48 @@ export default function SessionsPage() {
                       {selectedSession.agent_type}
                     </Badge>
                   )}
+                  {selectedSession.source === "discovery" && (
+                    <Badge variant="outline">历史发现</Badge>
+                  )}
                 </div>
-                <p className="text-muted-foreground m-0">{selectedSession.session_id}</p>
+                <p className="text-muted-foreground m-0 text-sm font-mono">{selectedSession.session_id}</p>
+
+                {selectedSession.goal && (
+                  <div className="flex flex-col gap-1 bg-muted px-4 py-3 rounded-md">
+                    <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">目标</span>
+                    <p className="m-0 text-sm leading-relaxed">{selectedSession.goal}</p>
+                  </div>
+                )}
+
+                {selectedSession.outcome && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground font-medium">结果:</span>
+                    <Badge variant={selectedSession.outcome === "fully_achieved" ? "default" : "outline"}>
+                      {selectedSession.outcome}
+                    </Badge>
+                  </div>
+                )}
+
+                {(selectedSession.duration_minutes > 0 || selectedSession.input_tokens > 0) && (
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    {selectedSession.duration_minutes > 0 && (
+                      <span>时长: {selectedSession.duration_minutes} 分钟</span>
+                    )}
+                    {selectedSession.input_tokens > 0 && (
+                      <span>输入: {formatTokens(selectedSession.input_tokens)} tokens</span>
+                    )}
+                    {selectedSession.output_tokens > 0 && (
+                      <span>输出: {formatTokens(selectedSession.output_tokens)} tokens</span>
+                    )}
+                  </div>
+                )}
+
+                {selectedSession.summary && (
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">摘要</span>
+                    <p className="m-0 text-sm leading-relaxed text-muted-foreground">{selectedSession.summary}</p>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-col gap-6 mt-6 items-stretch">
