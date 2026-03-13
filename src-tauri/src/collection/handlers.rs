@@ -294,10 +294,12 @@ pub(super) async fn get_transcript(
                 }
                 _ => {}
             }
-            let _ = state.transcript_register_tx.try_send(transcript::TranscriptRegisterRequest {
-                session_id: query.session_id.clone(),
-                transcript_path: path,
-            });
+            if std::path::Path::new(&path).exists() {
+                let _ = state.transcript_register_tx.try_send(transcript::TranscriptRegisterRequest {
+                    session_id: query.session_id.clone(),
+                    transcript_path: path,
+                });
+            }
         }
     }
 

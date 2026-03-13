@@ -268,7 +268,6 @@ pub(super) fn read_transcript_increment(
     let mut reader = std::io::BufReader::new(file);
     let mut lines = Vec::new();
     let mut bytes_consumed: i64 = 0;
-    let mut new_pending = String::new();
 
     loop {
         if bytes_consumed >= super::TRANSCRIPT_SYNC_MAX_BYTES as i64 {
@@ -290,19 +289,14 @@ pub(super) fn read_transcript_increment(
             }
         } else {
             pending_fragment.push_str(&line_buf);
-            new_pending = std::mem::take(&mut pending_fragment);
         }
-    }
-
-    if new_pending.is_empty() {
-        new_pending = pending_fragment;
     }
 
     let next_offset_bytes = offset + bytes_consumed;
 
     Ok(TranscriptReadResult {
         lines,
-        pending_fragment: new_pending,
+        pending_fragment,
         next_offset_bytes,
         file_mtime_ms,
         file_size_bytes,
@@ -450,6 +444,7 @@ pub(super) fn persist_linemux_line(
         "UPDATE session_transcripts
          SET imported_offset_bytes = ?1,
              updated_at_ms = ?2,
+             pending_fragment = '',
              last_error_message = NULL,
              last_error_stack = NULL
          WHERE session_id = ?3",

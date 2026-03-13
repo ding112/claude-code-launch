@@ -10,8 +10,12 @@ export function useEvents() {
     fromMs?: number,
     toMs?: number,
   ) => {
-    const data = await fetchEvents(sessionId, { fromMs, toMs });
-    setEvents(data.items);
+    try {
+      const data = await fetchEvents(sessionId, { fromMs, toMs });
+      setEvents(data.items);
+    } catch (error) {
+      console.error("Failed to load events:", error);
+    }
   }, []);
 
   const clearEvents = useCallback(() => {

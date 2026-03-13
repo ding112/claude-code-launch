@@ -1,4 +1,4 @@
-import { useState, useMemo, type UIEvent } from "react";
+import { useState, useMemo, useEffect, useRef, type UIEvent } from "react";
 import type { TranscriptLineItem, EventItem } from "./types";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -48,12 +48,15 @@ type ProgressData = {
   command?: string;
 };
 
+export type TimeRange = { minMs: number; maxMs: number };
+
 type TranscriptViewProps = {
   items: TranscriptLineItem[];
   events: EventItem[];
   loadingMore: boolean;
   hasMore: boolean;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
+  onTimeRangeChange?: (range: TimeRange | null) => void;
 };
 
 type MergedTimelineItem =
@@ -131,13 +134,18 @@ function mergeTimeline(records: ParsedRecord[], events: EventItem[]): MergedTime
   return result;
 }
 
-export function extractTranscriptTimeRange(items: TranscriptLineItem[]): { minMs: number; maxMs: number } | null {
-  return parseLines(items).timeRange;
-}
-
-export default function TranscriptView({ items, events, loadingMore, hasMore, onScroll }: TranscriptViewProps) {
-  const { records } = useMemo(() => parseLines(items), [items]);
+export default function TranscriptView({ items, events, loadingMore, hasMore, onScroll, onTimeRangeChange }: TranscriptViewProps) {
+  const { records, timeRange } = useMemo(() => parseLines(items), [items]);
   const merged = useMemo(() => mergeTimeline(records, events), [records, events]);
+
+  const prevRangeKeyRef = useRef("");
+  useEffect(() => {
+    const key = timeRange ? `${timeRange.minMs}-${timeRange.maxMs}` : "";
+    if (key !== prevRangeKeyRef.current) {
+      prevRangeKeyRef.current = key;
+      onTimeRangeChange?.(timeRange);
+    }
+  }, [timeRange, onTimeRangeChange]);
 
   return (
     <div
