@@ -189,7 +189,6 @@ pub(super) fn validate_transcript_path(raw: &str) -> Option<String> {
             return None;
         }
     }
-
     Some(raw.to_string())
 }
 

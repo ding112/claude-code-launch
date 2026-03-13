@@ -109,7 +109,9 @@ fn load_all_tracked_sessions(
     let mut statement = db.prepare(
         "SELECT session_id, transcript_path
          FROM session_transcripts
-         WHERE transcript_path != ''",
+         WHERE transcript_path != ''
+         ORDER BY updated_at_ms DESC
+         LIMIT 100",
     )?;
     let mut rows = statement.query([])?;
     let mut results = Vec::new();
