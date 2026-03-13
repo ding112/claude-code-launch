@@ -254,6 +254,8 @@ def report_with_background_thread(payload: dict) -> None:
 
     thread = threading.Thread(target=worker, name="hook-report-worker", daemon=True)
     thread.start()
+    # Note: Daemon thread runs in background and will be killed when main process exits
+    # No join() call - this is truly async execution
 
 
 def main() -> int:

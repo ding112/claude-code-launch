@@ -1,3 +1,5 @@
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 export type Tab = "sessions" | "settings" | "setup";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -14,17 +16,14 @@ export default function TabSwitcher({
   onTabChange: (tab: Tab) => void;
 }) {
   return (
-    <div className="flex gap-1 bg-white p-1 rounded-lg border border-black/6 shadow-sm">
-      {TABS.map((t) => (
-        <button
-          key={t.id}
-          className={`border-none bg-transparent text-gray-500 font-medium px-4 py-1.5 rounded-md transition-all duration-150 ${tab === t.id ? "!bg-black !text-white shadow-sm" : "hover:bg-gray-100 hover:text-gray-900"}`}
-          type="button"
-          onClick={() => onTabChange(t.id)}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
+    <Tabs value={tab} onValueChange={(v) => onTabChange(v as Tab)}>
+      <TabsList>
+        {TABS.map((t) => (
+          <TabsTrigger key={t.id} value={t.id}>
+            {t.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }

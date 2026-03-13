@@ -38,3 +38,4 @@ src-tauri/target/
 openspec
 .claude/commands/opsx/
 .claude/skills/openspec-*
+*.pyc

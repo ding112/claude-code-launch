@@ -294,6 +294,10 @@ pub(super) async fn get_transcript(
                 }
                 _ => {}
             }
+            let _ = state.transcript_register_tx.try_send(transcript::TranscriptRegisterRequest {
+                session_id: query.session_id.clone(),
+                transcript_path: path,
+            });
         }
     }
 
@@ -731,6 +735,13 @@ pub(super) async fn sync_transcript(
 
     transcript::upsert_transcript_sync_state(&mut db, &request.session_id, &transcript_path, &read_result)
         .map_err(|error| ApiError::Internal(format!("failed to upsert transcript sync state: {error:?}")))?;
+
+    drop(db);
+
+    let _ = state.transcript_register_tx.try_send(transcript::TranscriptRegisterRequest {
+        session_id: request.session_id.clone(),
+        transcript_path,
+    });
 
     Ok(Json(SyncTranscriptResponse {
         accepted: true,

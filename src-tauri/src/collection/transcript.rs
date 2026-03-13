@@ -1,4 +1,5 @@
 use super::*;
+use std::io::BufRead;
 
 #[derive(Debug, Clone)]
 pub(super) struct TranscriptSyncState {
@@ -20,6 +21,7 @@ pub(super) struct TranscriptReadResult {
 
 pub(super) fn sync_transcript_after_event(
     db: &Arc<Mutex<Connection>>,
+    transcript_register_tx: &mpsc::Sender<TranscriptRegisterRequest>,
     event: &IncomingEvent,
 ) {
     let Some(transcript_path) = extract_transcript_path(&event.payload) else {
@@ -80,6 +82,19 @@ pub(super) fn sync_transcript_after_event(
             "level=error event=transcript_sync stage=upsert session_id={session_id} error={error:?}"
         );
     }
+
+    drop(db_guard);
+
+    let _ = transcript_register_tx.try_send(TranscriptRegisterRequest {
+        session_id,
+        transcript_path,
+    });
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct TranscriptRegisterRequest {
+    pub(super) session_id: String,
+    pub(super) transcript_path: String,
 }
 
 fn record_transcript_error_with_db(
@@ -199,6 +214,9 @@ pub(super) fn load_transcript_sync_state(
     Ok(None)
 }
 
+/// Read transcript file incrementally from stored offset using BufReader
+/// for line-safe UTF-8 reads. Replaces the old byte-slicing approach that
+/// could corrupt multi-byte characters at chunk boundaries.
 pub(super) fn read_transcript_increment(
     transcript_path: &str,
     existing_state: Option<&TranscriptSyncState>,
@@ -245,47 +263,49 @@ pub(super) fn read_transcript_increment(
     }
 
     file.seek(SeekFrom::Start(offset as u64))?;
-    let mut chunk_bytes = Vec::new();
-    file.take(super::TRANSCRIPT_SYNC_MAX_BYTES as u64)
-        .read_to_end(&mut chunk_bytes)?;
-    let chunk = String::from_utf8_lossy(&chunk_bytes).to_string();
-    let (lines, next_pending_fragment) = split_transcript_lines(&pending_fragment, &chunk);
-    let next_offset_bytes = offset + chunk_bytes.len() as i64;
+    let mut reader = std::io::BufReader::new(file);
+    let mut lines = Vec::new();
+    let mut bytes_consumed: i64 = 0;
+    let mut new_pending = String::new();
+
+    loop {
+        if bytes_consumed >= super::TRANSCRIPT_SYNC_MAX_BYTES as i64 {
+            break;
+        }
+        let mut line_buf = String::new();
+        let n = reader.read_line(&mut line_buf)?;
+        if n == 0 {
+            break;
+        }
+        bytes_consumed += n as i64;
+
+        if line_buf.ends_with('\n') {
+            if !pending_fragment.is_empty() {
+                pending_fragment.push_str(&line_buf);
+                lines.push(std::mem::take(&mut pending_fragment));
+            } else {
+                lines.push(line_buf);
+            }
+        } else {
+            pending_fragment.push_str(&line_buf);
+            new_pending = std::mem::take(&mut pending_fragment);
+        }
+    }
+
+    if new_pending.is_empty() {
+        new_pending = pending_fragment;
+    }
+
+    let next_offset_bytes = offset + bytes_consumed;
 
     Ok(TranscriptReadResult {
         lines,
-        pending_fragment: next_pending_fragment,
+        pending_fragment: new_pending,
         next_offset_bytes,
         file_mtime_ms,
         file_size_bytes,
         reset_content,
     })
-}
-
-fn split_transcript_lines(pending_fragment: &str, chunk: &str) -> (Vec<String>, String) {
-    let combined = format!("{pending_fragment}{chunk}");
-    if combined.is_empty() {
-        return (Vec::new(), String::new());
-    }
-
-    let mut lines = Vec::new();
-    let mut start = 0usize;
-    for (index, ch) in combined.char_indices() {
-        if ch == '\n' {
-            let line_end = if index > start && combined.as_bytes().get(index - 1) == Some(&b'\r') {
-                index - 1
-            } else {
-                index
-            };
-            let mut line = combined[start..line_end].to_string();
-            line.push('\n');
-            lines.push(line);
-            start = index + 1;
-        }
-    }
-
-    let pending = combined[start..].to_string();
-    (lines, pending)
 }
 
 pub(super) fn upsert_transcript_sync_state(
@@ -304,11 +324,7 @@ pub(super) fn upsert_transcript_sync_state(
         )?;
     }
 
-    let mut next_line_no = tx.query_row(
-        "SELECT COALESCE(MAX(line_no), 0) + 1 FROM session_transcript_lines WHERE session_id = ?1",
-        params![session_id],
-        |row| row.get::<_, i64>(0),
-    )?;
+    let mut next_line_no = get_next_line_no(&tx, session_id).unwrap_or(1);
 
     if !result.lines.is_empty() {
         let mut insert_statement = tx.prepare(
@@ -358,6 +374,93 @@ pub(super) fn upsert_transcript_sync_state(
     )?;
     tx.commit()?;
     Ok(())
+}
+
+/// Helper function to get the next line number for a session.
+/// Queries MAX(line_no) from session_transcript_lines and returns next value.
+fn get_next_line_no(tx: &Connection, session_id: &str) -> Option<i64> {
+    match tx.query_row(
+        "SELECT COALESCE(MAX(line_no), 0) + 1 FROM session_transcript_lines WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get::<_, i64>(0),
+    ) {
+        Ok(n) => Some(n),
+        Err(error) => {
+            eprintln!(
+                "level=error event=get_next_line_no session_id={session_id} error={error:?}"
+            );
+            None
+        }
+    }
+}
+
+/// Persist a single line received from linemux into SQLite.
+/// Updates both the transcript lines table and the sync state metadata.
+pub(super) fn persist_linemux_line(
+    db: &Arc<Mutex<Connection>>,
+    session_id: &str,
+    transcript_path: &std::path::Path,
+    line_without_newline: &str,
+) {
+    let mut db_guard = match db.lock() {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!(
+                "level=error event=linemux_persist stage=lock_sqlite session_id={session_id} path={transcript_path:?} error={error:?}"
+            );
+            return;
+        }
+    };
+
+    let now = now_timestamp_ms();
+    let tx = match db_guard.transaction() {
+        Ok(tx) => tx,
+        Err(error) => {
+            eprintln!(
+                "level=error event=linemux_persist stage=begin_tx session_id={session_id} path={transcript_path:?} error={error:?}"
+            );
+            return;
+        }
+    };
+
+    let Some(next_line_no) = get_next_line_no(&tx, session_id) else {
+        return;
+    };
+
+    let line_with_newline = format!("{line_without_newline}\n");
+    let line_bytes = line_with_newline.len() as i64;
+
+    if let Err(error) = tx.execute(
+        "INSERT INTO session_transcript_lines(session_id, line_no, line_content, created_at_ms)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![session_id, next_line_no, line_with_newline, now],
+    ) {
+        eprintln!(
+            "level=error event=linemux_persist stage=insert_line session_id={session_id} path={transcript_path:?} error={error:?}"
+        );
+        return;
+    }
+
+    if let Err(error) = tx.execute(
+        "UPDATE session_transcripts
+         SET imported_offset_bytes = imported_offset_bytes + ?1,
+             updated_at_ms = ?2,
+             last_error_message = NULL,
+             last_error_stack = NULL
+         WHERE session_id = ?3",
+        params![line_bytes, now, session_id],
+    ) {
+        eprintln!(
+            "level=error event=linemux_persist stage=update_offset session_id={session_id} path={transcript_path:?} error={error:?}"
+        );
+        return;
+    }
+
+    if let Err(error) = tx.commit() {
+        eprintln!(
+            "level=error event=linemux_persist stage=commit session_id={session_id} path={transcript_path:?} error={error:?}"
+        );
+    }
 }
 
 pub(super) fn record_transcript_error(

@@ -7,3 +7,7 @@ export function riskClass(level: string): string {
 export function formatTimestamp(value: number): string {
   return new Date(value).toLocaleString();
 }
+
+export function truncate(str: string, max: number): string {
+  return str.length > max ? `${str.slice(0, max)}…` : str;
+}

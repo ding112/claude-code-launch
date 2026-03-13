@@ -42,10 +42,10 @@ function App() {
 
   if (mode === "loading") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-50">
+      <main className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
-          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-black" />
-          <p className="text-sm text-slate-500">正在检测环境...</p>
+          <div className="mx-auto mb-4 size-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+          <p className="text-sm text-muted-foreground">正在检测环境...</p>
         </div>
       </main>
     );
@@ -53,7 +53,7 @@ function App() {
 
   if (mode === "setup") {
     return (
-      <main className="min-h-screen bg-slate-50">
+      <main className="min-h-screen bg-background">
         <SetupPage
           logs={logs}
           initialPrereqs={initialPrereqs}
@@ -64,9 +64,9 @@ function App() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      <header className="flex items-center justify-between border-b border-black/6 bg-white px-6 py-3">
-        <h1 className="text-lg font-bold tracking-tight text-slate-900">
+    <main className="min-h-screen bg-background flex flex-col">
+      <header className="flex items-center justify-between border-b px-6 py-3 bg-card">
+        <h1 className="text-lg font-bold tracking-tight">
           Claude Code Launch
         </h1>
         <TabSwitcher tab={tab} onTabChange={setTab} />

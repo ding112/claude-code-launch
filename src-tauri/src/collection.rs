@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -43,6 +43,7 @@ pub struct AppState {
     #[allow(dead_code)]
     eval_counter: Arc<AtomicU64>,
     eval_config_cache: Arc<RwLock<EvalConfig>>,
+    transcript_register_tx: mpsc::Sender<transcript::TranscriptRegisterRequest>,
 }
 
 impl AppState {
@@ -55,15 +56,18 @@ impl AppState {
         let db = Arc::new(Mutex::new(db));
         let (eval_tx, eval_rx) = mpsc::channel(128);
         let (event_tx, event_rx) = mpsc::channel::<IncomingEvent>(512);
+        let (transcript_register_tx, transcript_register_rx) =
+            mpsc::channel::<transcript::TranscriptRegisterRequest>(256);
         let eval_counter = Arc::new(AtomicU64::new(0));
         let eval_config_cache = Arc::new(RwLock::new(eval_config));
         eval_queue::spawn_evaluation_worker(db.clone(), eval_config_cache.clone(), eval_rx);
-        transcript_poller::spawn_transcript_poller(db.clone());
+        transcript_poller::spawn_transcript_watcher(db.clone(), transcript_register_rx);
         spawn_event_worker(
             db.clone(),
             eval_tx.clone(),
             eval_counter.clone(),
             eval_config_cache.clone(),
+            transcript_register_tx.clone(),
             event_rx,
         );
 
@@ -73,6 +77,7 @@ impl AppState {
             event_tx,
             eval_counter,
             eval_config_cache,
+            transcript_register_tx,
         })
     }
 
@@ -86,15 +91,18 @@ impl AppState {
         let db = Arc::new(Mutex::new(db));
         let (eval_tx, eval_rx) = mpsc::channel(128);
         let (event_tx, event_rx) = mpsc::channel::<IncomingEvent>(512);
+        let (transcript_register_tx, transcript_register_rx) =
+            mpsc::channel::<transcript::TranscriptRegisterRequest>(256);
         let eval_counter = Arc::new(AtomicU64::new(0));
         let eval_config_cache = Arc::new(RwLock::new(eval_config));
         eval_queue::spawn_evaluation_worker(db.clone(), eval_config_cache.clone(), eval_rx);
-        transcript_poller::spawn_transcript_poller(db.clone());
+        transcript_poller::spawn_transcript_watcher(db.clone(), transcript_register_rx);
         spawn_event_worker(
             db.clone(),
             eval_tx.clone(),
             eval_counter.clone(),
             eval_config_cache.clone(),
+            transcript_register_tx.clone(),
             event_rx,
         );
 
@@ -104,6 +112,7 @@ impl AppState {
             event_tx,
             eval_counter,
             eval_config_cache,
+            transcript_register_tx,
         })
     }
 }
@@ -321,6 +330,7 @@ struct EventWorkerContext {
     eval_tx: mpsc::Sender<EvaluationJob>,
     eval_counter: Arc<AtomicU64>,
     eval_config_cache: Arc<RwLock<EvalConfig>>,
+    transcript_register_tx: mpsc::Sender<transcript::TranscriptRegisterRequest>,
 }
 
 fn spawn_event_worker(
@@ -328,6 +338,7 @@ fn spawn_event_worker(
     eval_tx: mpsc::Sender<EvaluationJob>,
     eval_counter: Arc<AtomicU64>,
     eval_config_cache: Arc<RwLock<EvalConfig>>,
+    transcript_register_tx: mpsc::Sender<transcript::TranscriptRegisterRequest>,
     mut event_rx: mpsc::Receiver<IncomingEvent>,
 ) {
     tokio::spawn(async move {
@@ -336,6 +347,7 @@ fn spawn_event_worker(
             eval_tx,
             eval_counter,
             eval_config_cache,
+            transcript_register_tx,
         };
         while let Some(event) = event_rx.recv().await {
             let ctx = ctx.clone();
@@ -372,7 +384,7 @@ fn process_incoming_event(ctx: &EventWorkerContext, event: &IncomingEvent) {
         }
     };
 
-    transcript::sync_transcript_after_event(&ctx.db, event);
+    transcript::sync_transcript_after_event(&ctx.db, &ctx.transcript_register_tx, event);
 
     if inserted {
         eval_queue::enqueue_for_worker(
@@ -1481,6 +1493,8 @@ mod tests {
         let db = Arc::new(Mutex::new(db));
         let (eval_tx, _eval_rx) = mpsc::channel(128);
         let (event_tx, _event_rx) = mpsc::channel::<IncomingEvent>(1);
+        let (transcript_register_tx, _transcript_register_rx) =
+            mpsc::channel::<transcript::TranscriptRegisterRequest>(16);
 
         let state = AppState {
             db,
@@ -1488,6 +1502,7 @@ mod tests {
             event_tx,
             eval_counter: Arc::new(AtomicU64::new(0)),
             eval_config_cache: Arc::new(RwLock::new(EvalConfig::default())),
+            transcript_register_tx,
         };
         let app = build_router(state);
 
@@ -1674,7 +1689,11 @@ mod tests {
     }
 
     fn temp_transcript_path(suffix: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("transcript-{suffix}-{}.jsonl", Uuid::new_v4()))
+        let base = dirs::home_dir()
+            .map(|h| h.join(".cache").join("claude-code-launch-test"))
+            .unwrap_or_else(|| std::env::temp_dir().join("claude-code-launch-test"));
+        fs::create_dir_all(&base).expect("should create test temp dir under home");
+        base.join(format!("transcript-{suffix}-{}.jsonl", Uuid::new_v4()))
     }
 
     fn transcript_state(state: &AppState, session_id: &str) -> Option<(String, i64)> {

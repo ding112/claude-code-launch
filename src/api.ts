@@ -15,18 +15,25 @@ export async function fetchSessions(): Promise<SessionItem[]> {
 
 export async function fetchEvents(
   sessionId: string,
-  page: number,
-  pageSize: number,
-  eventType: string,
+  opts?: {
+    page?: number;
+    pageSize?: number;
+    eventType?: string;
+    fromMs?: number;
+    toMs?: number;
+  },
 ): Promise<EventResponse> {
+  const { page = 1, pageSize = 200, eventType, fromMs, toMs } = opts ?? {};
   const params = new URLSearchParams({
     session_id: sessionId,
     page: String(page),
     page_size: String(pageSize),
   });
-  if (eventType.trim()) {
+  if (eventType?.trim()) {
     params.set("event_type", eventType.trim());
   }
+  if (fromMs != null) params.set("from_ms", String(fromMs));
+  if (toMs != null) params.set("to_ms", String(toMs));
   const response = await fetch(`${API_BASE}/events?${params.toString()}`);
   return (await response.json()) as EventResponse;
 }
