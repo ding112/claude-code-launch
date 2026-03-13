@@ -1,4 +1,4 @@
-import { useState, useMemo, type UIEvent } from "react";
+import { useState, useMemo, useEffect, useRef, type UIEvent } from "react";
 import type { TranscriptLineItem, EventItem } from "./types";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -48,26 +48,44 @@ type ProgressData = {
   command?: string;
 };
 
+export type TimeRange = { minMs: number; maxMs: number };
+
 type TranscriptViewProps = {
   items: TranscriptLineItem[];
   events: EventItem[];
   loadingMore: boolean;
   hasMore: boolean;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
+  onTimeRangeChange?: (range: TimeRange | null) => void;
 };
 
 type MergedTimelineItem =
   | { kind: "transcript"; record: ParsedRecord; timestampMs: number }
   | { kind: "event"; event: EventItem; timestampMs: number };
 
-function parseLines(items: TranscriptLineItem[]): ParsedRecord[] {
-  return items.map((item) => {
+type ParseLinesResult = {
+  records: ParsedRecord[];
+  timeRange: { minMs: number; maxMs: number } | null;
+};
+
+function parseLines(items: TranscriptLineItem[]): ParseLinesResult {
+  let minMs = Infinity;
+  let maxMs = -Infinity;
+
+  const records = items.map((item) => {
     const trimmed = item.line_content.trim();
     if (!trimmed) return { line_no: item.line_no, raw: item.line_content, parsed: null };
     try {
       const obj = JSON.parse(trimmed) as TranscriptEntry;
       if (typeof obj !== "object" || obj === null) {
         return { line_no: item.line_no, raw: item.line_content, parsed: null };
+      }
+      if (obj.timestamp) {
+        const ms = new Date(obj.timestamp).getTime();
+        if (!Number.isNaN(ms)) {
+          if (ms < minMs) minMs = ms;
+          if (ms > maxMs) maxMs = ms;
+        }
       }
       if (!obj.type && typeof (obj as Record<string, unknown>).role === "string") {
         obj.type = (obj as Record<string, unknown>).role as string;
@@ -80,6 +98,9 @@ function parseLines(items: TranscriptLineItem[]): ParsedRecord[] {
       return { line_no: item.line_no, raw: item.line_content, parsed: null };
     }
   });
+
+  const timeRange = minMs === Infinity || maxMs === -Infinity ? null : { minMs, maxMs };
+  return { records, timeRange };
 }
 
 function mergeTimeline(records: ParsedRecord[], events: EventItem[]): MergedTimelineItem[] {
@@ -98,36 +119,33 @@ function mergeTimeline(records: ParsedRecord[], events: EventItem[]): MergedTime
     timestampMs: e.created_at_ms,
   }));
 
-  return [...tsRecords, ...tsEvents].sort((a, b) => {
-    if (a.timestampMs !== b.timestampMs) return a.timestampMs - b.timestampMs;
-    return a.kind === "transcript" ? -1 : 1;
-  });
-}
-
-export function extractTranscriptTimeRange(items: TranscriptLineItem[]): { minMs: number; maxMs: number } | null {
-  let minMs = Infinity;
-  let maxMs = -Infinity;
-  for (const item of items) {
-    const trimmed = item.line_content.trim();
-    if (!trimmed) continue;
-    try {
-      const obj = JSON.parse(trimmed) as { timestamp?: string };
-      if (obj.timestamp) {
-        const ms = new Date(obj.timestamp).getTime();
-        if (!Number.isNaN(ms)) {
-          if (ms < minMs) minMs = ms;
-          if (ms > maxMs) maxMs = ms;
-        }
-      }
-    } catch { /* skip unparseable lines */ }
+  const result: MergedTimelineItem[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < tsRecords.length && j < tsEvents.length) {
+    if (tsRecords[i].timestampMs <= tsEvents[j].timestampMs) {
+      result.push(tsRecords[i++]);
+    } else {
+      result.push(tsEvents[j++]);
+    }
   }
-  if (minMs === Infinity || maxMs === -Infinity) return null;
-  return { minMs, maxMs };
+  while (i < tsRecords.length) result.push(tsRecords[i++]);
+  while (j < tsEvents.length) result.push(tsEvents[j++]);
+  return result;
 }
 
-export default function TranscriptView({ items, events, loadingMore, hasMore, onScroll }: TranscriptViewProps) {
-  const records = useMemo(() => parseLines(items), [items]);
+export default function TranscriptView({ items, events, loadingMore, hasMore, onScroll, onTimeRangeChange }: TranscriptViewProps) {
+  const { records, timeRange } = useMemo(() => parseLines(items), [items]);
   const merged = useMemo(() => mergeTimeline(records, events), [records, events]);
+
+  const prevRangeKeyRef = useRef("");
+  useEffect(() => {
+    const key = timeRange ? `${timeRange.minMs}-${timeRange.maxMs}` : "";
+    if (key !== prevRangeKeyRef.current) {
+      prevRangeKeyRef.current = key;
+      onTimeRangeChange?.(timeRange);
+    }
+  }, [timeRange, onTimeRangeChange]);
 
   return (
     <div

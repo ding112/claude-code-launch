@@ -170,12 +170,17 @@ impl Provider for OllamaProvider {
 
 static FAIL_ONCE_SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
+const FAIL_ONCE_MAX_ENTRIES: usize = 10_000;
+
 fn should_fail_once(event_id: &str) -> bool {
     let seen = FAIL_ONCE_SEEN.get_or_init(|| Mutex::new(HashSet::new()));
     let mut guard = seen.lock().expect("fail-once set lock should be available");
     if guard.contains(event_id) {
         false
     } else {
+        if guard.len() >= FAIL_ONCE_MAX_ENTRIES {
+            guard.clear();
+        }
         guard.insert(event_id.to_string());
         true
     }

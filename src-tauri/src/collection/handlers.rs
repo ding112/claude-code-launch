@@ -31,7 +31,6 @@ pub(super) async fn post_event(
 
     Ok(Json(EventAck {
         accepted: true,
-        duplicate: false,
         event_id,
     }))
 }
@@ -294,10 +293,12 @@ pub(super) async fn get_transcript(
                 }
                 _ => {}
             }
-            let _ = state.transcript_register_tx.try_send(transcript::TranscriptRegisterRequest {
-                session_id: query.session_id.clone(),
-                transcript_path: path,
-            });
+            if std::path::Path::new(&path).exists() {
+                let _ = state.transcript_register_tx.try_send(transcript::TranscriptRegisterRequest {
+                    session_id: query.session_id.clone(),
+                    transcript_path: path,
+                });
+            }
         }
     }
 
@@ -643,6 +644,16 @@ pub(super) async fn archive_session(
         params![request.session_id, archive_before_ms],
     )
     .map_err(|error| ApiError::Internal(format!("failed to archive session events: {error:?}")))?;
+
+    db.execute(
+        "
+        UPDATE session_transcripts
+        SET transcript_path = ''
+        WHERE session_id = ?1
+        ",
+        params![request.session_id],
+    )
+    .map_err(|error| ApiError::Internal(format!("failed to clear transcript path on archive: {error:?}")))?;
 
     Ok(Json(ApiErrorBody {
         accepted: true,

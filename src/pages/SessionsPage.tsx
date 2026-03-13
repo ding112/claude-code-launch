@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
-import TranscriptView, { extractTranscriptTimeRange } from "../TranscriptView";
+import { useEffect, useCallback } from "react";
+import TranscriptView from "../TranscriptView";
+import type { TimeRange } from "../TranscriptView";
 import Pager from "../components/Pager";
 import { useSessions } from "../hooks/useSessions";
 import { useEvents } from "../hooks/useEvents";
@@ -50,8 +51,6 @@ export default function SessionsPage() {
     handleTranscriptScroll,
   } = useTranscript(selectedSessionId);
 
-  const prevTimeRangeRef = useRef<string>("");
-
   useEffect(() => {
     void loadSessions();
   }, []);
@@ -62,14 +61,13 @@ export default function SessionsPage() {
   }, [selectedSessionId]);
 
   useEffect(() => {
-    if (!selectedSessionId || !transcript?.items.length) return;
-    const range = extractTranscriptTimeRange(transcript.items);
-    const rangeKey = range ? `${range.minMs}-${range.maxMs}` : "";
-    if (rangeKey && rangeKey !== prevTimeRangeRef.current) {
-      prevTimeRangeRef.current = rangeKey;
-      void loadEvents(selectedSessionId, range!.minMs, range!.maxMs);
-    }
-  }, [selectedSessionId, transcript]);
+    clearEvents();
+  }, [selectedSessionId, clearEvents]);
+
+  const handleTimeRangeChange = useCallback((range: TimeRange | null) => {
+    if (!selectedSessionId || !range) return;
+    void loadEvents(selectedSessionId, range.minMs, range.maxMs);
+  }, [selectedSessionId, loadEvents]);
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6 flex-1 min-h-0 items-stretch p-6">
@@ -215,6 +213,7 @@ export default function SessionsPage() {
                           loadingMore={transcriptLoadingMore}
                           hasMore={transcript.has_more}
                           onScroll={handleTranscriptScroll}
+                          onTimeRangeChange={handleTimeRangeChange}
                         />
                       ) : null}
                       {transcript?.imported_offset_bytes ? (

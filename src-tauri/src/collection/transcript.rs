@@ -169,17 +169,26 @@ pub(super) fn validate_transcript_path(raw: &str) -> Option<String> {
         return None;
     }
 
+    let home = dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h));
+
     if let Ok(canonical) = path.canonicalize() {
-        let home = dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h));
-        if let Some(home) = home {
-            if !canonical.starts_with(&home) {
-                eprintln!("level=warn event=transcript_path_rejected reason=outside_home_dir path={raw}");
+        if let Some(home) = &home {
+            let allowed_dir = home.join(".claude").join("projects");
+            if !canonical.starts_with(&allowed_dir) {
+                eprintln!("level=warn event=transcript_path_rejected reason=outside_allowed_dir path={raw}");
                 return None;
             }
         }
         return Some(canonical.to_string_lossy().to_string());
     }
 
+    if let Some(home) = &home {
+        let allowed_dir = home.join(".claude").join("projects");
+        if !path.starts_with(&allowed_dir) {
+            eprintln!("level=warn event=transcript_path_rejected reason=outside_allowed_dir_unresolved path={raw}");
+            return None;
+        }
+    }
     Some(raw.to_string())
 }
 
@@ -258,7 +267,6 @@ pub(super) fn read_transcript_increment(
     let mut reader = std::io::BufReader::new(file);
     let mut lines = Vec::new();
     let mut bytes_consumed: i64 = 0;
-    let mut new_pending = String::new();
 
     loop {
         if bytes_consumed >= super::TRANSCRIPT_SYNC_MAX_BYTES as i64 {
@@ -280,19 +288,14 @@ pub(super) fn read_transcript_increment(
             }
         } else {
             pending_fragment.push_str(&line_buf);
-            new_pending = std::mem::take(&mut pending_fragment);
         }
-    }
-
-    if new_pending.is_empty() {
-        new_pending = pending_fragment;
     }
 
     let next_offset_bytes = offset + bytes_consumed;
 
     Ok(TranscriptReadResult {
         lines,
-        pending_fragment: new_pending,
+        pending_fragment,
         next_offset_bytes,
         file_mtime_ms,
         file_size_bytes,
@@ -420,7 +423,10 @@ pub(super) fn persist_linemux_line(
     };
 
     let line_with_newline = format!("{line_without_newline}\n");
-    let line_bytes = line_with_newline.len() as i64;
+
+    let file_size = std::fs::metadata(transcript_path)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
 
     if let Err(error) = tx.execute(
         "INSERT INTO session_transcript_lines(session_id, line_no, line_content, created_at_ms)
@@ -435,12 +441,13 @@ pub(super) fn persist_linemux_line(
 
     if let Err(error) = tx.execute(
         "UPDATE session_transcripts
-         SET imported_offset_bytes = imported_offset_bytes + ?1,
+         SET imported_offset_bytes = ?1,
              updated_at_ms = ?2,
+             pending_fragment = '',
              last_error_message = NULL,
              last_error_stack = NULL
          WHERE session_id = ?3",
-        params![line_bytes, now, session_id],
+        params![file_size, now, session_id],
     ) {
         eprintln!(
             "level=error event=linemux_persist stage=update_offset session_id={session_id} path={transcript_path:?} error={error:?}"

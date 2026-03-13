@@ -33,6 +33,7 @@ uuid = { version = "1", features = ["v4"] }
 schemars = "0.8"
 dirs = "6"
 linemux = "0.3"
+chrono = "0.4"
 
 [dev-dependencies]
 tower = "0.5"

@@ -39,3 +39,7 @@ openspec
 .claude/commands/opsx/
 .claude/skills/openspec-*
 *.pyc
+
+# AI skill configs
+.agents/skills/shadcn/
+.cursor/plans/

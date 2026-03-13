@@ -60,17 +60,7 @@ fn backup_file(path: &PathBuf) -> Result<(), String> {
 }
 
 fn chrono_timestamp() -> String {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs();
-    let hours = (secs / 3600) % 24;
-    let minutes = (secs / 60) % 60;
-    let seconds = secs % 60;
-    let days = secs / 86400;
-    let year = 1970 + days / 365;
-    format!("{year}{days:03}-{hours:02}{minutes:02}{seconds:02}")
+    chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()
 }
 
 fn write_settings_file(path: &PathBuf, value: &Value) -> Result<(), String> {
