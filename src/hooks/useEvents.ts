@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import type { EventResponse } from "../types";
 import { fetchEvents } from "../api";
 
@@ -12,7 +12,7 @@ export function useEvents() {
   const [eventTypeFilter, setEventTypeFilter] = useState<string>("");
   const [eventsCollapsed, setEventsCollapsed] = useState(true);
 
-  const loadEvents = async (
+  const loadEvents = useCallback(async (
     sessionId: string,
     page: number,
     pageSize: number,
@@ -20,7 +20,7 @@ export function useEvents() {
   ) => {
     const data = await fetchEvents(sessionId, page, pageSize, eventType);
     setEvents(data);
-  };
+  }, []);
 
   const gotoEventPage = (sessionId: string, nextPage: number) => {
     if (!sessionId) return;

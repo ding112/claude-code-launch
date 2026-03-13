@@ -154,15 +154,23 @@ pub(super) fn validate_transcript_path(raw: &str) -> Option<String> {
         return None;
     }
 
+    let home = dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h));
+
     if let Ok(canonical) = path.canonicalize() {
-        let home = dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h));
-        if let Some(home) = home {
-            if !canonical.starts_with(&home) {
+        if let Some(home) = &home {
+            if !canonical.starts_with(home) {
                 eprintln!("level=warn event=transcript_path_rejected reason=outside_home_dir path={raw}");
                 return None;
             }
         }
         return Some(canonical.to_string_lossy().to_string());
+    }
+
+    if let Some(home) = &home {
+        if !path.starts_with(home) {
+            eprintln!("level=warn event=transcript_path_rejected reason=outside_home_dir_unresolved path={raw}");
+            return None;
+        }
     }
 
     Some(raw.to_string())
@@ -264,7 +272,14 @@ fn split_transcript_lines(pending_fragment: &str, chunk: &str) -> (Vec<String>, 
     let mut start = 0usize;
     for (index, ch) in combined.char_indices() {
         if ch == '\n' {
-            lines.push(combined[start..=index].to_string());
+            let line_end = if index > start && combined.as_bytes().get(index - 1) == Some(&b'\r') {
+                index - 1
+            } else {
+                index
+            };
+            let mut line = combined[start..line_end].to_string();
+            line.push('\n');
+            lines.push(line);
             start = index + 1;
         }
     }

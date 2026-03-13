@@ -640,6 +640,16 @@ pub(super) async fn archive_session(
     )
     .map_err(|error| ApiError::Internal(format!("failed to archive session events: {error:?}")))?;
 
+    db.execute(
+        "
+        UPDATE session_transcripts
+        SET transcript_path = ''
+        WHERE session_id = ?1
+        ",
+        params![request.session_id],
+    )
+    .map_err(|error| ApiError::Internal(format!("failed to clear transcript path on archive: {error:?}")))?;
+
     Ok(Json(ApiErrorBody {
         accepted: true,
         error: String::new(),

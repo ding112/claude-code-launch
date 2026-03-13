@@ -59,7 +59,7 @@ export default function SessionsPage() {
     if (!selectedSessionId) return;
     void loadEvents(selectedSessionId, events.page, events.page_size, eventTypeFilter);
     void loadEvaluations(selectedSessionId, evaluations.page, evaluations.page_size);
-  }, [selectedSessionId, eventTypeFilter]);
+  }, [selectedSessionId, eventTypeFilter, loadEvents, loadEvaluations]);
 
   useEffect(() => {
     setEventsCollapsed(true);
