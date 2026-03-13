@@ -14,9 +14,9 @@ export function useEvents() {
     setEvents(data.items);
   }, []);
 
-  const clearEvents = () => {
+  const clearEvents = useCallback(() => {
     setEvents([]);
-  };
+  }, []);
 
   return {
     events,

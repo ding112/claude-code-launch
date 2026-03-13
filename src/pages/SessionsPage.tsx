@@ -62,6 +62,11 @@ export default function SessionsPage() {
   }, [selectedSessionId]);
 
   useEffect(() => {
+    prevTimeRangeRef.current = "";
+    clearEvents();
+  }, [selectedSessionId, clearEvents]);
+
+  useEffect(() => {
     if (!selectedSessionId || !transcript?.items.length) return;
     const range = extractTranscriptTimeRange(transcript.items);
     const rangeKey = range ? `${range.minMs}-${range.maxMs}` : "";
@@ -69,7 +74,7 @@ export default function SessionsPage() {
       prevTimeRangeRef.current = rangeKey;
       void loadEvents(selectedSessionId, range!.minMs, range!.maxMs);
     }
-  }, [selectedSessionId, transcript]);
+  }, [selectedSessionId, transcript, loadEvents]);
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6 flex-1 min-h-0 items-stretch p-6">
