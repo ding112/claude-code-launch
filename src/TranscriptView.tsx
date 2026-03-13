@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, type UIEvent } from "react";
 import type { TranscriptLineItem, EventItem } from "./types";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { truncate } from "./utils";
 
@@ -103,8 +104,21 @@ function parseLines(items: TranscriptLineItem[]): ParseLinesResult {
   return { records, timeRange };
 }
 
+function inferInitialTimestamp(records: ParsedRecord[], events: EventItem[]): number {
+  for (const r of records) {
+    if (r.parsed?.timestamp) {
+      const ms = new Date(r.parsed.timestamp).getTime();
+      if (!Number.isNaN(ms)) return ms;
+    }
+  }
+  if (events.length > 0) {
+    return Math.min(...events.map((e) => e.created_at_ms));
+  }
+  return 0;
+}
+
 function mergeTimeline(records: ParsedRecord[], events: EventItem[]): MergedTimelineItem[] {
-  let lastTs = 0;
+  let lastTs = inferInitialTimestamp(records, events);
   const tsRecords: MergedTimelineItem[] = records.map((r) => {
     if (r.parsed?.timestamp) {
       const ms = new Date(r.parsed.timestamp).getTime();
@@ -135,8 +149,12 @@ function mergeTimeline(records: ParsedRecord[], events: EventItem[]): MergedTime
 }
 
 export default function TranscriptView({ items, events, loadingMore, hasMore, onScroll, onTimeRangeChange }: TranscriptViewProps) {
+  const [ascending, setAscending] = useState(true);
   const { records, timeRange } = useMemo(() => parseLines(items), [items]);
-  const merged = useMemo(() => mergeTimeline(records, events), [records, events]);
+  const merged = useMemo(() => {
+    const list = mergeTimeline(records, events);
+    return ascending ? list : [...list].reverse();
+  }, [records, events, ascending]);
 
   const prevRangeKeyRef = useRef("");
   useEffect(() => {
@@ -148,26 +166,38 @@ export default function TranscriptView({ items, events, loadingMore, hasMore, on
   }, [timeRange, onTimeRangeChange]);
 
   return (
-    <div
-      className="max-h-[700px] overflow-y-auto rounded-md border bg-muted p-4 flex flex-col gap-1"
-      onScroll={onScroll}
-    >
-      {loadingMore && (
-        <p className="text-muted-foreground m-0 py-1 text-xs text-center">加载更多中...</p>
-      )}
-      {merged.map((item) =>
-        item.kind === "transcript" ? (
-          <RecordRow key={`t-${item.record.line_no}`} record={item.record} />
-        ) : (
-          <EventBubble key={`e-${item.event.event_id}`} event={item.event} />
-        ),
-      )}
-      {!hasMore && (
-        <p className="text-muted-foreground m-0 py-1 text-xs text-center">已到最早内容</p>
-      )}
-      {hasMore && !loadingMore && (
-        <p className="text-muted-foreground m-0 py-1 text-xs text-center">向下滚动加载更早内容</p>
-      )}
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs"
+          onClick={() => setAscending((v) => !v)}
+        >
+          {ascending ? "正序 ↑" : "倒序 ↓"}
+        </Button>
+      </div>
+      <div
+        className="max-h-[700px] overflow-y-auto rounded-md border bg-muted p-4 flex flex-col gap-1"
+        onScroll={onScroll}
+      >
+        {loadingMore && (
+          <p className="text-muted-foreground m-0 py-1 text-xs text-center">加载更多中...</p>
+        )}
+        {merged.map((item) =>
+          item.kind === "transcript" ? (
+            <RecordRow key={`t-${item.record.line_no}`} record={item.record} />
+          ) : (
+            <EventBubble key={`e-${item.event.event_id}`} event={item.event} />
+          ),
+        )}
+        {!hasMore && (
+          <p className="text-muted-foreground m-0 py-1 text-xs text-center">已到最早内容</p>
+        )}
+        {hasMore && !loadingMore && (
+          <p className="text-muted-foreground m-0 py-1 text-xs text-center">向下滚动加载更早内容</p>
+        )}
+      </div>
     </div>
   );
 }
