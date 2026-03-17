@@ -218,7 +218,7 @@ pub(super) async fn get_sessions(State(state): State<AppState>) -> Result<Json<V
         WHERE EXISTS (
             SELECT 1 FROM events e
             WHERE e.session_id = s.session_id AND e.is_archived = 0
-        ) OR s.source = 'discovery'
+        ) OR s.source IN ('discovery', 'cursor-discovery')
         ORDER BY s.last_active_at_ms DESC
     ";
 

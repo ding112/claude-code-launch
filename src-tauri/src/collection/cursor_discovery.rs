@@ -36,6 +36,15 @@ fn extract_project_name(encoded_dir: &str) -> String {
     if encoded_dir.is_empty() {
         return "unknown".to_string();
     }
+    let markers = ["IdeaProjects-", "workspace-github-", "workspace-frontend-", "workspace-python-", "workspace-scripts-", "workspace-"];
+    for marker in markers {
+        if let Some(pos) = encoded_dir.find(marker) {
+            let after = &encoded_dir[pos + marker.len()..];
+            if !after.is_empty() {
+                return after.to_string();
+            }
+        }
+    }
     encoded_dir
         .rsplit('-')
         .next()
@@ -329,6 +338,7 @@ fn update_existing_cursor_session(
 ) -> rusqlite::Result<bool> {
     let changed = tx.execute(
         "UPDATE sessions SET
+            project_name = ?4,
             first_prompt = CASE WHEN first_prompt = '' THEN ?2 ELSE first_prompt END,
             last_active_at_ms = MAX(last_active_at_ms, ?3)
         WHERE session_id = ?1",
@@ -336,6 +346,7 @@ fn update_existing_cursor_session(
             session.session_id,
             session.first_prompt,
             session.last_active_at_ms,
+            session.project_name,
         ],
     )?;
     Ok(changed > 0)
