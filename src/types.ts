@@ -72,6 +72,10 @@ export type DiscoverResult = {
   imported: number;
   updated: number;
   errors: number;
+  cursor_scanned: number;
+  cursor_imported: number;
+  cursor_updated: number;
+  cursor_errors: number;
 };
 
 export type EventItem = {
@@ -153,4 +157,48 @@ export type HooksData = {
 export type HooksInitResult = {
   events: Record<string, HookBlock[]>;
   added_count: number;
+};
+
+// ── Cursor AI tracking types ──
+
+export type ScoredCommit = {
+  commit_hash: string;
+  branch_name: string;
+  lines_added: number;
+  lines_deleted: number;
+  tab_lines_added: number;
+  tab_lines_deleted: number;
+  composer_lines_added: number;
+  composer_lines_deleted: number;
+  human_lines_added: number;
+  human_lines_deleted: number;
+  blank_lines_added: number;
+  blank_lines_deleted: number;
+  commit_message: string;
+  commit_date: string;
+  ai_percentage: number;
+};
+
+export type ScoredCommitsResponse = {
+  items: ScoredCommit[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type ModelStat = {
+  model: string;
+  code_count: number;
+};
+
+export type AiTrackingStats = {
+  total_commits: number;
+  total_lines_added: number;
+  total_lines_deleted: number;
+  total_ai_lines_added: number;
+  total_ai_lines_deleted: number;
+  total_human_lines_added: number;
+  total_human_lines_deleted: number;
+  avg_ai_percentage: number;
+  model_distribution: ModelStat[];
 };

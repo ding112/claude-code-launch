@@ -138,11 +138,18 @@ export default function SessionsPage() {
                               ) : null}
                               <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
                                 {session.agent_type && (
-                                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                  <Badge
+                                    variant="secondary"
+                                    className={cn(
+                                      "text-[10px] px-1.5 py-0",
+                                      session.agent_type === "cursor" && "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
+                                      session.agent_type === "claude-code" && "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
+                                    )}
+                                  >
                                     {session.agent_type}
                                   </Badge>
                                 )}
-                                {session.source === "discovery" && (
+                                {(session.source === "discovery" || session.source === "cursor-discovery") && (
                                   <Badge variant="outline" className="text-[10px] px-1.5 py-0">
                                     历史
                                   </Badge>
@@ -196,11 +203,17 @@ export default function SessionsPage() {
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="text-2xl font-bold tracking-tight m-0">{selectedSession.project_name}</h3>
                   {selectedSession.agent_type && (
-                    <Badge variant="secondary">
+                    <Badge
+                      variant="secondary"
+                      className={cn(
+                        selectedSession.agent_type === "cursor" && "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
+                        selectedSession.agent_type === "claude-code" && "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
+                      )}
+                    >
                       {selectedSession.agent_type}
                     </Badge>
                   )}
-                  {selectedSession.source === "discovery" && (
+                  {(selectedSession.source === "discovery" || selectedSession.source === "cursor-discovery") && (
                     <Badge variant="outline">历史发现</Badge>
                   )}
                 </div>

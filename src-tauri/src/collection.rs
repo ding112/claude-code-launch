@@ -32,6 +32,10 @@ mod handlers;
 mod hooks;
 #[path = "collection/discovery.rs"]
 mod discovery;
+#[path = "collection/cursor_discovery.rs"]
+mod cursor_discovery;
+#[path = "collection/cursor_ai_tracking.rs"]
+mod cursor_ai_tracking;
 #[path = "collection/transcript.rs"]
 mod transcript;
 #[path = "collection/transcript_poller.rs"]
@@ -273,6 +277,12 @@ struct EvaluationQueryResponse {
     page_size: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct AiTrackingCommitsQuery {
+    page: Option<u32>,
+    page_size: Option<u32>,
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message, error_code, retryable) = match self {
@@ -400,6 +410,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/evaluations/retry", post(handlers::retry_evaluation))
         .route("/hooks", get(handlers::get_hooks).post(handlers::save_hooks))
         .route("/hooks/init", post(handlers::init_hooks))
+        .route("/cursor/ai-tracking/commits", get(handlers::get_ai_tracking_commits))
+        .route("/cursor/ai-tracking/stats", get(handlers::get_ai_tracking_stats))
         .layer(cors)
         .with_state(state)
 }

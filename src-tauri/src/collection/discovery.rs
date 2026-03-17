@@ -24,6 +24,10 @@ pub(super) struct DiscoverResult {
     pub imported: usize,
     pub updated: usize,
     pub errors: usize,
+    pub cursor_scanned: usize,
+    pub cursor_imported: usize,
+    pub cursor_updated: usize,
+    pub cursor_errors: usize,
 }
 
 fn claude_home() -> Option<PathBuf> {
@@ -225,6 +229,10 @@ pub(super) fn import_discovered_sessions(
                     imported: 0,
                     updated: 0,
                     errors: sessions.len(),
+                    cursor_scanned: 0,
+                    cursor_imported: 0,
+                    cursor_updated: 0,
+                    cursor_errors: 0,
                 };
             }
         };
@@ -245,6 +253,10 @@ pub(super) fn import_discovered_sessions(
                 imported: 0,
                 updated: 0,
                 errors: sessions.len(),
+                cursor_scanned: 0,
+                cursor_imported: 0,
+                cursor_updated: 0,
+                cursor_errors: 0,
             };
         }
     };
@@ -300,6 +312,10 @@ pub(super) fn import_discovered_sessions(
         imported,
         updated,
         errors,
+        cursor_scanned: 0,
+        cursor_imported: 0,
+        cursor_updated: 0,
+        cursor_errors: 0,
     }
 }
 

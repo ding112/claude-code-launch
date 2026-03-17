@@ -287,11 +287,21 @@ pub(super) async fn discover_sessions(
     State(state): State<AppState>,
 ) -> Result<Json<discovery::DiscoverResult>, ApiError> {
     let discovered = discovery::scan_session_meta();
+    let cursor_discovered = cursor_discovery::scan_cursor_sessions();
+
     let mut db = state
         .db
         .lock()
         .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
-    let result = discovery::import_discovered_sessions(&mut db, &discovered);
+
+    let mut result = discovery::import_discovered_sessions(&mut db, &discovered);
+
+    let cursor_result = cursor_discovery::import_cursor_sessions(&mut db, &cursor_discovered);
+    result.cursor_scanned = cursor_result.scanned;
+    result.cursor_imported = cursor_result.imported;
+    result.cursor_updated = cursor_result.updated;
+    result.cursor_errors = cursor_result.errors;
+
     Ok(Json(result))
 }
 
@@ -792,4 +802,21 @@ pub(super) async fn sync_transcript(
         lines_imported,
         message: format!("synced {lines_imported} new lines from transcript file"),
     }))
+}
+
+pub(super) async fn get_ai_tracking_commits(
+    Query(query): Query<AiTrackingCommitsQuery>,
+) -> Result<Json<cursor_ai_tracking::ScoredCommitsResponse>, ApiError> {
+    let page = query.page.unwrap_or(1);
+    let page_size = query.page_size.unwrap_or(50);
+    cursor_ai_tracking::query_scored_commits(page, page_size)
+        .map(Json)
+        .map_err(ApiError::Internal)
+}
+
+pub(super) async fn get_ai_tracking_stats(
+) -> Result<Json<cursor_ai_tracking::AiTrackingStats>, ApiError> {
+    cursor_ai_tracking::query_ai_code_stats()
+        .map(Json)
+        .map_err(ApiError::Internal)
 }

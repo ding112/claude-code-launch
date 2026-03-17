@@ -101,8 +101,19 @@ export function useSessions() {
     try {
       const result = await discoverSessions();
       await loadSessions();
+      const parts: string[] = [];
+      if (result.scanned > 0 || result.imported > 0 || result.updated > 0) {
+        parts.push(
+          `Claude Code: 扫描 ${result.scanned}，导入 ${result.imported}，更新 ${result.updated}${result.errors > 0 ? `，错误 ${result.errors}` : ""}`,
+        );
+      }
+      if (result.cursor_scanned > 0 || result.cursor_imported > 0 || result.cursor_updated > 0) {
+        parts.push(
+          `Cursor: 扫描 ${result.cursor_scanned}，导入 ${result.cursor_imported}，更新 ${result.cursor_updated}${result.cursor_errors > 0 ? `，错误 ${result.cursor_errors}` : ""}`,
+        );
+      }
       setSessionMessage(
-        `扫描 ${result.scanned} 个历史 session，导入 ${result.imported}，更新 ${result.updated}${result.errors > 0 ? `，错误 ${result.errors}` : ""}。`,
+        parts.length > 0 ? parts.join("；") + "。" : "未发现新的历史 session。",
       );
       return result;
     } catch {

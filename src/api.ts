@@ -7,6 +7,8 @@ import type {
   EvalSettings,
   HooksData,
   HooksInitResult,
+  ScoredCommitsResponse,
+  AiTrackingStats,
 } from "./types";
 
 async function assertOk(response: Response): Promise<Response> {
@@ -131,4 +133,25 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
     body: JSON.stringify({ session_id: sessionId }),
   });
   return response.ok;
+}
+
+export async function fetchAiTrackingCommits(
+  page = 1,
+  pageSize = 50,
+): Promise<ScoredCommitsResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  const response = await assertOk(
+    await fetch(`${API_BASE}/cursor/ai-tracking/commits?${params.toString()}`),
+  );
+  return (await response.json()) as ScoredCommitsResponse;
+}
+
+export async function fetchAiTrackingStats(): Promise<AiTrackingStats> {
+  const response = await assertOk(
+    await fetch(`${API_BASE}/cursor/ai-tracking/stats`),
+  );
+  return (await response.json()) as AiTrackingStats;
 }
