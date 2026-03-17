@@ -64,8 +64,8 @@ function App() {
   }
 
   return (
-    <main className="min-h-screen bg-background flex flex-col">
-      <header className="flex items-center justify-between border-b px-6 py-3 bg-card">
+    <main className="h-screen bg-background flex flex-col overflow-hidden">
+      <header className="flex items-center justify-between border-b px-6 py-3 bg-card shrink-0">
         <h1 className="text-lg font-bold tracking-tight">
           Claude Code Launch
         </h1>

@@ -62,8 +62,8 @@ export default function SessionsPage() {
   }, [selectedSessionId, loadEvents]);
 
   return (
-    <section className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6 flex-1 min-h-0 items-stretch p-6">
-      <Card className="lg:overflow-y-auto min-w-0">
+    <section className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6 flex-1 min-h-0 items-stretch p-6 overflow-hidden">
+      <Card className="overflow-y-auto min-w-0">
         <CardHeader>
           <CardTitle>Session 列表</CardTitle>
           <CardAction>
@@ -161,7 +161,7 @@ export default function SessionsPage() {
         </CardContent>
       </Card>
 
-      <Card className="lg:overflow-y-auto min-w-0 overflow-x-hidden">
+      <Card className="overflow-y-auto min-w-0 overflow-x-hidden">
         <CardHeader>
           <CardTitle>Session 详情</CardTitle>
           {selectedSession ? (
