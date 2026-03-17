@@ -1,12 +1,10 @@
 import { useEffect, useCallback } from "react";
 import TranscriptView from "../TranscriptView";
 import type { TimeRange } from "../TranscriptView";
-import Pager from "../components/Pager";
 import { useSessions } from "../hooks/useSessions";
 import { useEvents } from "../hooks/useEvents";
-import { useEvaluations } from "../hooks/useEvaluations";
 import { useTranscript } from "../hooks/useTranscript";
-import { riskClass, formatTimestamp } from "../utils";
+import { formatTimestamp } from "../utils";
 import { Card, CardHeader, CardTitle, CardAction, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,30 +41,16 @@ export default function SessionsPage() {
   } = useEvents();
 
   const {
-    evaluations,
-    loadEvaluations,
-    gotoEvaluationPage,
-    clearEvaluations,
-  } = useEvaluations();
-
-  const {
     transcript,
     transcriptLoading,
     transcriptLoadingMore,
     transcriptError,
-    transcriptCollapsed,
-    setTranscriptCollapsed,
     handleTranscriptScroll,
   } = useTranscript(selectedSessionId);
 
   useEffect(() => {
     void loadSessions();
   }, []);
-
-  useEffect(() => {
-    if (!selectedSessionId) return;
-    void loadEvaluations(selectedSessionId, evaluations.page, evaluations.page_size);
-  }, [selectedSessionId]);
 
   useEffect(() => {
     clearEvents();
@@ -187,7 +171,7 @@ export default function SessionsPage() {
                 size="sm"
                 className="hover:border-destructive/30 hover:text-destructive hover:bg-destructive/10"
                 disabled={archiving}
-                onClick={() => void archiveSelectedSession(clearEvents, clearEvaluations)}
+                onClick={() => void archiveSelectedSession(clearEvents)}
               >
                 {archiving ? "归档中..." : "归档"}
               </Button>
@@ -257,107 +241,41 @@ export default function SessionsPage() {
                 )}
               </div>
 
-              <div className="flex flex-col gap-6 mt-6 items-stretch">
-                <Collapsible
-                  open={!transcriptCollapsed}
-                  onOpenChange={(open) => setTranscriptCollapsed(!open)}
-                >
-                  <div className={cn("flex flex-col", transcriptCollapsed ? "gap-0" : "gap-3")}>
-                    <div className="flex justify-between items-center gap-3">
-                      <CollapsibleTrigger className="w-full flex items-center justify-start gap-1.5 p-0 border-none bg-transparent text-inherit shadow-none cursor-pointer text-left hover:shadow-none">
-                        <h4 className="m-0 flex items-center gap-1.5">
-                          <span className="text-[10px] transition-transform duration-150 opacity-70">{transcriptCollapsed ? "▶" : "▼"}</span>
-                          Transcript
-                        </h4>
-                      </CollapsibleTrigger>
-                      {transcript?.updated_at_ms ? (
-                        <span className="text-xs text-muted-foreground font-mono whitespace-nowrap">
-                          更新于 {formatTimestamp(transcript.updated_at_ms)}
-                        </span>
-                      ) : null}
-                    </div>
-                    <CollapsibleContent>
-                      {transcriptLoading ? <p className="text-muted-foreground">Transcript 加载中...</p> : null}
-                      {!transcriptLoading && transcriptError ? (
-                        <p className="text-destructive">{transcriptError}</p>
-                      ) : null}
-                      {!transcriptLoading &&
-                      !transcriptError &&
-                      transcript?.last_error_message ? (
-                        <p className="text-destructive">
-                          最近同步错误：{transcript.last_error_message}
-                        </p>
-                      ) : null}
-                      {!transcriptLoading &&
-                      !transcriptError &&
-                      (!transcript || transcript.items.length === 0) ? (
-                        <p className="text-muted-foreground">暂无 transcript 内容</p>
-                      ) : null}
-                      {!transcriptLoading && transcript?.items.length ? (
-                        <TranscriptView
-                          items={transcript.items}
-                          events={events}
-                          loadingMore={transcriptLoadingMore}
-                          hasMore={transcript.has_more}
-                          onScroll={handleTranscriptScroll}
-                          onTimeRangeChange={handleTimeRangeChange}
-                        />
-                      ) : null}
-                      {transcript?.imported_offset_bytes ? (
-                        <p className="text-muted-foreground mt-2.5">
-                          已导入偏移：{transcript.imported_offset_bytes} bytes
-                        </p>
-                      ) : null}
-                    </CollapsibleContent>
-                  </div>
-                </Collapsible>
-
-                <div className="min-w-0">
-                  <h4>评估结果</h4>
-                  <ul className="timeline list-none m-0 p-0 flex flex-col gap-4">
-                    {evaluations.items.map((item) => (
-                      <li key={item.evaluation_id} className="list-none">
-                        <Card size="sm">
-                          <CardContent className="flex flex-col gap-3">
-                            <div className="flex justify-between items-center pb-3 border-b">
-                              <Badge variant="outline" className="font-mono font-semibold">{item.status}</Badge>
-                              <span className="text-xs text-muted-foreground font-mono">{formatTimestamp(item.created_at_ms)}</span>
-                            </div>
-                            <div className="flex flex-col gap-2 bg-muted px-4 py-3 rounded-md">
-                              <div className="flex items-center gap-2 text-sm">
-                                <span className="text-muted-foreground font-medium min-w-[80px]">Risk:</span>
-                                <span className={cn("font-semibold inline-flex px-2 py-0.5 rounded text-xs uppercase", riskClass(item.risk_level))}>{item.risk_level}</span>
-                                <span className="text-muted-foreground text-[13px]">({item.risk_category})</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm">
-                                <span className="text-muted-foreground font-medium min-w-[80px]">Efficiency:</span>
-                                <span className="font-semibold">{item.efficiency_level}</span>
-                              </div>
-                            </div>
-                            {item.suggestion && (
-                              <div className="flex flex-col gap-1.5">
-                                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Suggestion</div>
-                                <p className="m-0 text-sm text-emerald-800 leading-relaxed p-3 bg-emerald-50 border border-emerald-200 rounded-md">{item.suggestion}</p>
-                              </div>
-                            )}
-                            {item.error_message && (
-                              <div className="flex flex-col gap-1.5">
-                                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Error</div>
-                                <pre className="m-0 overflow-auto max-h-[400px] bg-destructive/10 text-destructive rounded-md p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">{item.error_message}</pre>
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </li>
-                    ))}
-                  </ul>
-                  <Pager
-                    page={evaluations.page}
-                    pageSize={evaluations.page_size}
-                    total={evaluations.total}
-                    onPageChange={(p) => gotoEvaluationPage(selectedSessionId, p)}
-                  />
+              <div className="flex flex-col gap-3 mt-4 flex-1 min-h-0">
+                <div className="flex justify-between items-center gap-3">
+                  <h4 className="m-0">Transcript</h4>
+                  {transcript?.updated_at_ms ? (
+                    <span className="text-xs text-muted-foreground font-mono whitespace-nowrap">
+                      更新于 {formatTimestamp(transcript.updated_at_ms)}
+                    </span>
+                  ) : null}
                 </div>
+                {transcriptLoading ? <p className="text-muted-foreground">Transcript 加载中...</p> : null}
+                {!transcriptLoading && transcriptError ? (
+                  <p className="text-destructive">{transcriptError}</p>
+                ) : null}
+                {!transcriptLoading &&
+                !transcriptError &&
+                transcript?.last_error_message ? (
+                  <p className="text-destructive">
+                    最近同步错误：{transcript.last_error_message}
+                  </p>
+                ) : null}
+                {!transcriptLoading &&
+                !transcriptError &&
+                (!transcript || transcript.items.length === 0) ? (
+                  <p className="text-muted-foreground">暂无 transcript 内容</p>
+                ) : null}
+                {!transcriptLoading && transcript?.items.length ? (
+                  <TranscriptView
+                    items={transcript.items}
+                    events={events}
+                    loadingMore={transcriptLoadingMore}
+                    hasMore={transcript.has_more}
+                    onScroll={handleTranscriptScroll}
+                    onTimeRangeChange={handleTimeRangeChange}
+                  />
+                ) : null}
               </div>
             </>
           ) : (

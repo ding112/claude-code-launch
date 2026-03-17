@@ -166,8 +166,8 @@ export default function TranscriptView({ items, events, loadingMore, hasMore, on
   }, [timeRange, onTimeRangeChange]);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex justify-end">
+    <div className="flex flex-col gap-2 flex-1 min-h-0">
+      <div className="flex justify-end shrink-0">
         <Button
           variant="outline"
           size="sm"
@@ -178,7 +178,7 @@ export default function TranscriptView({ items, events, loadingMore, hasMore, on
         </Button>
       </div>
       <div
-        className="max-h-[700px] overflow-y-auto rounded-md border bg-muted p-4 flex flex-col gap-1"
+        className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-muted p-4 flex flex-col gap-1"
         onScroll={onScroll}
       >
         {loadingMore && (

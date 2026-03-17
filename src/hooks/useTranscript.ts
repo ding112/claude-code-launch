@@ -7,7 +7,6 @@ export function useTranscript(selectedSessionId: string) {
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [transcriptLoadingMore, setTranscriptLoadingMore] = useState(false);
   const [transcriptError, setTranscriptError] = useState<string>("");
-  const [transcriptCollapsed, setTranscriptCollapsed] = useState(false);
   const transcriptAbortRef = useRef<AbortController | null>(null);
   const transcriptRequestSeqRef = useRef(0);
 
@@ -111,8 +110,6 @@ export function useTranscript(selectedSessionId: string) {
     transcriptLoading,
     transcriptLoadingMore,
     transcriptError,
-    transcriptCollapsed,
-    setTranscriptCollapsed,
     handleTranscriptScroll,
   };
 }

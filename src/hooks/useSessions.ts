@@ -64,7 +64,6 @@ export function useSessions() {
 
   const archiveSelectedSession = async (
     clearEvents: () => void,
-    clearEvaluations: () => void,
   ) => {
     if (!selectedSessionId) return;
 
@@ -86,7 +85,6 @@ export function useSessions() {
         setSelectedSessionId(nextSessionId);
         if (!nextSessionId) {
           clearEvents();
-          clearEvaluations();
         }
       }
       setSessionMessage("已归档当前 session。");
