@@ -155,6 +155,12 @@ export default function SetupPage({
             进入监控仪表盘
           </Button>
         )}
+
+        {phase !== "success" && phase !== "running" && onInstallComplete && (
+          <Button variant="ghost" onClick={onInstallComplete}>
+            跳过安装
+          </Button>
+        )}
       </div>
 
       {statusMessage && (
