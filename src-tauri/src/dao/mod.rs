@@ -111,7 +111,47 @@ fn detect_node_manager_paths() -> Vec<String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn refresh_path_from_registry() {}
+pub fn refresh_path_from_registry() {
+    use std::env;
+
+    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = Command::new(&shell)
+        .args(["-li", "-c", "echo $PATH"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let full_path = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if !full_path.is_empty() {
+                env::set_var("PATH", &full_path);
+            }
+        }
+        Ok(_) | Err(_) => {
+            let home = env::var("HOME").unwrap_or_default();
+            let fallback_dirs = [
+                "/usr/local/bin",
+                "/opt/homebrew/bin",
+                &format!("{home}/.local/bin"),
+                &format!("{home}/.npm-global/bin"),
+            ];
+            let current = env::var("PATH").unwrap_or_default();
+            let current_set: std::collections::HashSet<&str> =
+                current.split(':').filter(|s| !s.is_empty()).collect();
+            let mut extra = Vec::new();
+            for dir in &fallback_dirs {
+                if !current_set.contains(*dir) && Path::new(dir).is_dir() {
+                    extra.push(*dir);
+                }
+            }
+            if !extra.is_empty() {
+                let merged = format!("{}:{}", current, extra.join(":"));
+                env::set_var("PATH", &merged);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CommandRunResult {
