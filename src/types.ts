@@ -159,6 +159,10 @@ export type HooksInitResult = {
   added_count: number;
 };
 
+export type AppConfigData = {
+  event_enabled: boolean;
+};
+
 // ── Cursor AI tracking types ──
 
 export type ScoredCommit = {

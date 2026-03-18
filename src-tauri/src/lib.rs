@@ -32,10 +32,10 @@ fn absolute_path(path: &str) -> String {
     }
 }
 
-async fn run_http_server(addr: SocketAddr, db_path: String) -> Result<(), std::io::Error> {
+async fn run_http_server(addr: SocketAddr, db_path: String, event_enabled: bool) -> Result<(), std::io::Error> {
     println!("sqlite db path: {}", absolute_path(&db_path));
     println!("http server listening on http://{addr}");
-    collection::serve(addr, db_path).await
+    collection::serve(addr, db_path, event_enabled).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,6 +48,7 @@ pub fn run() {
         std::process::exit(1);
     });
     let db_path = app_cfg.db_path;
+    let event_enabled = app_cfg.event_enabled;
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         if let Err(error) = std::fs::create_dir_all(parent) {
             eprintln!("failed to create sqlite parent dir for {db_path}: {error:?}");
@@ -55,7 +56,7 @@ pub fn run() {
     }
 
     tauri::async_runtime::spawn(async move {
-        if let Err(error) = run_http_server(server_addr, db_path).await {
+        if let Err(error) = run_http_server(server_addr, db_path, event_enabled).await {
             eprintln!("failed to start http server: {error:?}");
         }
     });

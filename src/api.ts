@@ -9,6 +9,7 @@ import type {
   HooksInitResult,
   ScoredCommitsResponse,
   AiTrackingStats,
+  AppConfigData,
 } from "./types";
 
 async function assertOk(response: Response): Promise<Response> {
@@ -154,4 +155,9 @@ export async function fetchAiTrackingStats(): Promise<AiTrackingStats> {
     await fetch(`${API_BASE}/cursor/ai-tracking/stats`),
   );
   return (await response.json()) as AiTrackingStats;
+}
+
+export async function fetchAppConfig(): Promise<AppConfigData> {
+  const response = await assertOk(await fetch(`${API_BASE}/app-config`));
+  return (await response.json()) as AppConfigData;
 }

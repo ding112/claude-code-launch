@@ -11,6 +11,13 @@ pub(super) async fn post_event(
     State(state): State<AppState>,
     Json(mut event): Json<IncomingEvent>,
 ) -> Result<Json<EventAck>, ApiError> {
+    if !state.event_enabled {
+        return Ok(Json(EventAck {
+            accepted: false,
+            event_id: event.event_id,
+        }));
+    }
+
     super::validate_event(&event)?;
     super::sanitize_json_value(&mut event.payload);
 
@@ -819,4 +826,12 @@ pub(super) async fn get_ai_tracking_stats(
     cursor_ai_tracking::query_ai_code_stats()
         .map(Json)
         .map_err(ApiError::Internal)
+}
+
+pub(super) async fn get_app_config(
+    State(state): State<AppState>,
+) -> Json<AppConfigResponse> {
+    Json(AppConfigResponse {
+        event_enabled: state.event_enabled,
+    })
 }
