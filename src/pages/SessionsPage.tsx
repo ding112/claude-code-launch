@@ -184,24 +184,14 @@ export default function SessionsPage() {
           {selectedSession ? (
             <>
               <div className="mb-6 flex flex-col gap-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-2xl font-bold tracking-tight m-0">{selectedSession.project_name}</h3>
-                  {selectedSession.agent_type && (
-                    <Badge
-                      variant="secondary"
-                      className={cn(
-                        selectedSession.agent_type === "cursor" && "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-                        selectedSession.agent_type === "claude-code" && "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
-                      )}
-                    >
-                      {selectedSession.agent_type}
-                    </Badge>
-                  )}
-                  {(selectedSession.source === "discovery" || selectedSession.source === "cursor-discovery") && (
-                    <Badge variant="outline">历史发现</Badge>
-                  )}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-muted-foreground m-0 text-sm font-mono">{selectedSession.session_id}</p>
+                  {transcript?.updated_at_ms ? (
+                    <span className="text-xs text-muted-foreground font-mono whitespace-nowrap">
+                      更新于 {formatTimestamp(transcript.updated_at_ms)}
+                    </span>
+                  ) : null}
                 </div>
-                <p className="text-muted-foreground m-0 text-sm font-mono">{selectedSession.session_id}</p>
 
                 {selectedSession.goal && (
                   <div className="flex flex-col gap-1 bg-muted px-4 py-3 rounded-md">
@@ -242,14 +232,6 @@ export default function SessionsPage() {
               </div>
 
               <div className="flex flex-col gap-3 mt-4 flex-1 min-h-0">
-                <div className="flex justify-between items-center gap-3">
-                  <h4 className="m-0">Transcript</h4>
-                  {transcript?.updated_at_ms ? (
-                    <span className="text-xs text-muted-foreground font-mono whitespace-nowrap">
-                      更新于 {formatTimestamp(transcript.updated_at_ms)}
-                    </span>
-                  ) : null}
-                </div>
                 {transcriptLoading ? <p className="text-muted-foreground">Transcript 加载中...</p> : null}
                 {!transcriptLoading && transcriptError ? (
                   <p className="text-destructive">{transcriptError}</p>

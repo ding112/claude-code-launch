@@ -104,7 +104,7 @@ fn extract_first_prompt(transcript_path: &Path) -> String {
     String::new()
 }
 
-fn truncate_prompt(s: &str) -> String {
+pub(super) fn truncate_prompt(s: &str) -> String {
     const MAX_LEN: usize = 500;
     if s.len() <= MAX_LEN {
         s.to_string()

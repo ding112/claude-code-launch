@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::HashSet;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,6 +122,12 @@ pub(super) fn scan_session_meta() -> Vec<DiscoveredSession> {
             .map(|dir| resolve_transcript_path(dir, &project_path, &session_id))
             .unwrap_or_default();
 
+        let first_prompt = if first_prompt.is_empty() && !transcript_path.is_empty() {
+            extract_first_prompt_from_transcript(Path::new(&transcript_path))
+        } else {
+            first_prompt
+        };
+
         sessions.push(DiscoveredSession {
             session_id,
             project_path,
@@ -197,6 +204,44 @@ fn resolve_transcript_path(projects_dir: &Path, project_path: &str, session_id: 
     } else {
         String::new()
     }
+}
+
+fn extract_first_prompt_from_transcript(transcript_path: &Path) -> String {
+    let file = match std::fs::File::open(transcript_path) {
+        Ok(f) => f,
+        Err(_) => return String::new(),
+    };
+    let reader = std::io::BufReader::new(file);
+
+    for line in reader.lines().take(30) {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let parsed: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if parsed.get("type").and_then(Value::as_str) != Some("user") {
+            continue;
+        }
+        if parsed.get("isMeta").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let content = parsed
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if content.contains("<command-name>") || content.contains("<local-command-") {
+            continue;
+        }
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return super::cursor_discovery::truncate_prompt(trimmed);
+        }
+    }
+    String::new()
 }
 
 fn extract_project_name(project_path: &str) -> String {
