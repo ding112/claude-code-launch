@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionItem, DiscoverResult } from "../types";
 import { fetchSessions, archiveSession, discoverSessions } from "../api";
+
+export type DateRangePreset = "7d" | "30d" | "all";
+
+function presetToFromMs(preset: DateRangePreset): number | undefined {
+  if (preset === "all") return undefined;
+  const days = preset === "7d" ? 7 : 30;
+  return Date.now() - days * 24 * 60 * 60 * 1000;
+}
 
 export function useSessions() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -10,6 +18,14 @@ export function useSessions() {
   const [discovering, setDiscovering] = useState(false);
   const [sessionMessage, setSessionMessage] = useState<string>("");
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+
+  const [sourceFilter, setSourceFilter] = useState<string | undefined>();
+  const [datePreset, setDatePreset] = useState<DateRangePreset>("all");
+
+  const sourceFilterRef = useRef(sourceFilter);
+  const datePresetRef = useRef(datePreset);
+  sourceFilterRef.current = sourceFilter;
+  datePresetRef.current = datePreset;
 
   const selectedSession = useMemo(
     () => sessions.find((s) => s.session_id === selectedSessionId),
@@ -51,7 +67,10 @@ export function useSessions() {
   const loadSessions = async (): Promise<SessionItem[]> => {
     setLoading(true);
     try {
-      const data = await fetchSessions();
+      const data = await fetchSessions({
+        source: sourceFilterRef.current,
+        fromMs: presetToFromMs(datePresetRef.current),
+      });
       setSessions(data);
       if (!selectedSessionId && data.length > 0) {
         setSelectedSessionId(data[0].session_id);
@@ -133,6 +152,10 @@ export function useSessions() {
     archiving,
     discovering,
     sessionMessage,
+    sourceFilter,
+    setSourceFilter,
+    datePreset,
+    setDatePreset,
     toggleProject,
     loadSessions,
     archiveSelectedSession,

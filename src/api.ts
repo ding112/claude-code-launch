@@ -12,6 +12,7 @@ import type {
   AppConfigData,
   ConfigsResponse,
   ConfigContentResponse,
+  DashboardActivityResponse,
 } from "./types";
 
 async function assertOk(response: Response): Promise<Response> {
@@ -22,8 +23,18 @@ async function assertOk(response: Response): Promise<Response> {
   return response;
 }
 
-export async function fetchSessions(): Promise<SessionItem[]> {
-  const response = await assertOk(await fetch(`${API_BASE}/sessions`));
+export async function fetchSessions(opts?: {
+  source?: string;
+  fromMs?: number;
+  toMs?: number;
+}): Promise<SessionItem[]> {
+  const params = new URLSearchParams();
+  if (opts?.source) params.set("source", opts.source);
+  if (opts?.fromMs != null) params.set("from_ms", String(opts.fromMs));
+  if (opts?.toMs != null) params.set("to_ms", String(opts.toMs));
+  const qs = params.toString();
+  const url = qs ? `${API_BASE}/sessions?${qs}` : `${API_BASE}/sessions`;
+  const response = await assertOk(await fetch(url));
   return (await response.json()) as SessionItem[];
 }
 
@@ -175,4 +186,12 @@ export async function fetchConfigContent(id: string): Promise<ConfigContentRespo
     await fetch(`${API_BASE}/configs/${encodeURIComponent(id)}/content`),
   );
   return (await response.json()) as ConfigContentResponse;
+}
+
+export async function fetchDashboardActivity(days?: number): Promise<DashboardActivityResponse> {
+  const params = days ? `?days=${days}` : "";
+  const response = await assertOk(
+    await fetch(`${API_BASE}/dashboard/activity${params}`),
+  );
+  return (await response.json()) as DashboardActivityResponse;
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import TabSwitcher, { type Tab } from "./components/TabSwitcher";
+import DashboardPage from "./pages/DashboardPage";
 import SessionsPage from "./pages/SessionsPage";
 import ConfigPage from "./pages/ConfigPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -14,7 +15,7 @@ type AppMode = "loading" | "setup" | "dashboard";
 function App() {
   const [logs, setLogs] = useState<LogEvent[]>([]);
   const [mode, setMode] = useState<AppMode>("loading");
-  const [tab, setTab] = useState<Tab>("sessions");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [initialPrereqs, setInitialPrereqs] = useState<PrereqResult | null>(null);
 
   useEffect(() => {
@@ -73,6 +74,7 @@ function App() {
         <TabSwitcher tab={tab} onTabChange={setTab} />
       </header>
 
+      {tab === "dashboard" && <DashboardPage onNavigate={setTab} />}
       {tab === "sessions" && <SessionsPage />}
       {tab === "config" && <ConfigPage />}
       {tab === "settings" && <SettingsPage />}

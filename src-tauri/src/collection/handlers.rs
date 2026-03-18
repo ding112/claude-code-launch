@@ -189,14 +189,39 @@ pub(super) async fn get_events(
     }))
 }
 
-pub(super) async fn get_sessions(State(state): State<AppState>) -> Result<Json<Vec<SessionItem>>, ApiError> {
+pub(super) async fn get_sessions(
+    State(state): State<AppState>,
+    Query(query): Query<SessionsQuery>,
+) -> Result<Json<Vec<SessionItem>>, ApiError> {
     let db = state
         .db
         .lock()
         .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
 
-    let sql = "
-        SELECT
+    let mut extra_clauses = Vec::new();
+    let mut params: Vec<SqlValue> = Vec::new();
+
+    if let Some(source) = &query.source {
+        extra_clauses.push("s.agent_type = ?".to_string());
+        params.push(SqlValue::Text(source.clone()));
+    }
+    if let Some(from_ms) = query.from_ms {
+        extra_clauses.push("s.last_active_at_ms >= ?".to_string());
+        params.push(SqlValue::Integer(from_ms));
+    }
+    if let Some(to_ms) = query.to_ms {
+        extra_clauses.push("s.last_active_at_ms <= ?".to_string());
+        params.push(SqlValue::Integer(to_ms));
+    }
+
+    let extra_where = if extra_clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", extra_clauses.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT
             s.session_id,
             s.project_name,
             s.agent_type,
@@ -222,18 +247,19 @@ pub(super) async fn get_sessions(State(state): State<AppState>) -> Result<Json<V
             s.outcome,
             s.source
         FROM sessions s
-        WHERE EXISTS (
+        WHERE (EXISTS (
             SELECT 1 FROM events e
             WHERE e.session_id = s.session_id AND e.is_archived = 0
-        ) OR s.source IN ('discovery', 'cursor-discovery')
-        ORDER BY s.last_active_at_ms DESC
-    ";
+        ) OR s.source IN ('discovery', 'cursor-discovery'))
+        {extra_where}
+        ORDER BY s.last_active_at_ms DESC"
+    );
 
     let mut statement = db
-        .prepare(sql)
+        .prepare(&sql)
         .map_err(|error| ApiError::Internal(format!("failed to prepare sessions query: {error:?}")))?;
     let mut rows = statement
-        .query([])
+        .query(params_from_iter(params.iter()))
         .map_err(|error| ApiError::Internal(format!("failed to execute sessions query: {error:?}")))?;
 
     let mut items = Vec::new();
@@ -885,6 +911,70 @@ pub(super) async fn get_configs(
     Ok(Json(config_scanner::ConfigsResponse {
         items,
         project_count,
+    }))
+}
+
+pub(super) async fn get_dashboard_activity(
+    State(state): State<AppState>,
+    Query(query): Query<DashboardActivityQuery>,
+) -> Result<Json<DashboardActivityResponse>, ApiError> {
+    let days = query.days.unwrap_or(30).clamp(1, 365);
+    let cutoff_ms = now_timestamp_ms() - (days as i64) * 24 * 60 * 60 * 1000;
+
+    let db = state
+        .db
+        .lock()
+        .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
+
+    let daily_sql = "
+        SELECT
+            date(last_active_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+            COUNT(*) AS session_count,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens
+        FROM sessions
+        WHERE last_active_at_ms >= ?1
+        GROUP BY date
+        ORDER BY date ASC
+    ";
+
+    let mut statement = db
+        .prepare(daily_sql)
+        .map_err(|error| ApiError::Internal(format!("failed to prepare dashboard activity query: {error:?}")))?;
+    let mut rows = statement
+        .query(params![cutoff_ms])
+        .map_err(|error| ApiError::Internal(format!("failed to execute dashboard activity query: {error:?}")))?;
+
+    let mut daily = Vec::new();
+    let mut total_sessions: i64 = 0;
+    let mut total_input_tokens: i64 = 0;
+    let mut total_output_tokens: i64 = 0;
+
+    while let Some(row) = rows
+        .next()
+        .map_err(|error| ApiError::Internal(format!("failed to read dashboard activity row: {error:?}")))?
+    {
+        let session_count: i64 = row.get(1).unwrap_or(0);
+        let input_tokens: i64 = row.get(2).unwrap_or(0);
+        let output_tokens: i64 = row.get(3).unwrap_or(0);
+
+        total_sessions += session_count;
+        total_input_tokens += input_tokens;
+        total_output_tokens += output_tokens;
+
+        daily.push(DailyActivity {
+            date: row.get(0).unwrap_or_default(),
+            session_count,
+            input_tokens,
+            output_tokens,
+        });
+    }
+
+    Ok(Json(DashboardActivityResponse {
+        daily,
+        total_sessions,
+        total_input_tokens,
+        total_output_tokens,
     }))
 }
 

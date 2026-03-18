@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, type UIEvent } from "react";
-import type { TranscriptLineItem, EventItem } from "./types";
+import type { TranscriptLineItem, EventItem, TranscriptEntry, ContentBlock } from "./types";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,45 +11,9 @@ type ParsedRecord = {
   parsed: TranscriptEntry | null;
 };
 
-type TranscriptEntry = {
-  type: string;
-  subtype?: string;
-  timestamp?: string;
-  uuid?: string;
-  parentUuid?: string | null;
-  isSidechain?: boolean;
-  message?: MessagePayload;
-  data?: ProgressData;
-  hookCount?: number;
-  hookInfos?: { command: string; durationMs: number }[];
-  level?: string;
-  stopReason?: string;
-  hasOutput?: boolean;
-  [key: string]: unknown;
-};
-
-type MessagePayload = {
-  role?: string;
-  model?: string;
-  content?: string | ContentBlock[];
-  stop_reason?: string;
-  usage?: Record<string, unknown>;
-};
-
-type ContentBlock =
-  | { type: "text"; text: string }
-  | { type: "thinking"; thinking: string }
-  | { type: "tool_use"; name: string; id: string; input: Record<string, unknown> }
-  | { type: "tool_result"; content: string; tool_use_id: string };
-
-type ProgressData = {
-  type?: string;
-  hookEvent?: string;
-  hookName?: string;
-  command?: string;
-};
-
 export type TimeRange = { minMs: number; maxMs: number };
+
+export type ViewMode = "conversation" | "detailed";
 
 type TranscriptViewProps = {
   items: TranscriptLineItem[];
@@ -59,6 +23,7 @@ type TranscriptViewProps = {
   skippedLines?: number;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   onTimeRangeChange?: (range: TimeRange | null) => void;
+  defaultViewMode?: ViewMode;
 };
 
 type MergedTimelineItem =
@@ -149,13 +114,25 @@ function mergeTimeline(records: ParsedRecord[], events: EventItem[]): MergedTime
   return result;
 }
 
-export default function TranscriptView({ items, events, loadingMore, hasMore, skippedLines, onScroll, onTimeRangeChange }: TranscriptViewProps) {
+function isConversationItem(item: MergedTimelineItem): boolean {
+  if (item.kind !== "transcript") return false;
+  const t = item.record.parsed?.type;
+  return t === "user" || t === "assistant";
+}
+
+export default function TranscriptView({ items, events, loadingMore, hasMore, skippedLines, onScroll, onTimeRangeChange, defaultViewMode = "conversation" }: TranscriptViewProps) {
   const [ascending, setAscending] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>(defaultViewMode);
   const { records, timeRange } = useMemo(() => parseLines(items), [items]);
   const merged = useMemo(() => {
     const list = mergeTimeline(records, events);
     return ascending ? list : [...list].reverse();
   }, [records, events, ascending]);
+
+  const displayed = useMemo(() => {
+    if (viewMode === "detailed") return merged;
+    return merged.filter(isConversationItem);
+  }, [merged, viewMode]);
 
   const prevRangeKeyRef = useRef("");
   useEffect(() => {
@@ -168,7 +145,25 @@ export default function TranscriptView({ items, events, loadingMore, hasMore, sk
 
   return (
     <div className="flex flex-col gap-2 flex-1 min-h-0">
-      <div className="flex justify-end shrink-0">
+      <div className="flex justify-between items-center shrink-0">
+        <div className="flex gap-1">
+          <Button
+            variant={viewMode === "conversation" ? "default" : "outline"}
+            size="sm"
+            className="text-xs h-7 px-2.5"
+            onClick={() => setViewMode("conversation")}
+          >
+            对话
+          </Button>
+          <Button
+            variant={viewMode === "detailed" ? "default" : "outline"}
+            size="sm"
+            className="text-xs h-7 px-2.5"
+            onClick={() => setViewMode("detailed")}
+          >
+            详细
+          </Button>
+        </div>
         <Button
           variant="outline"
           size="sm"
@@ -185,9 +180,9 @@ export default function TranscriptView({ items, events, loadingMore, hasMore, sk
         {loadingMore && (
           <p className="text-muted-foreground m-0 py-1 text-xs text-center">加载更多中...</p>
         )}
-        {merged.map((item) =>
+        {displayed.map((item) =>
           item.kind === "transcript" ? (
-            <RecordRow key={`t-${item.record.line_no}`} record={item.record} />
+            <RecordRow key={`t-${item.record.line_no}`} record={item.record} viewMode={viewMode} />
           ) : (
             <EventBubble key={`e-${item.event.event_id}`} event={item.event} />
           ),
@@ -208,8 +203,9 @@ export default function TranscriptView({ items, events, loadingMore, hasMore, sk
   );
 }
 
-function RecordRow({ record }: { record: ParsedRecord }) {
+function RecordRow({ record, viewMode }: { record: ParsedRecord; viewMode: ViewMode }) {
   if (!record.parsed) {
+    if (viewMode === "conversation") return null;
     const display = record.raw.endsWith("\n") ? record.raw.slice(0, -1) : record.raw;
     if (!display.trim()) return null;
     return (
@@ -224,7 +220,9 @@ function RecordRow({ record }: { record: ParsedRecord }) {
     case "user":
       return <UserMessage entry={entry} />;
     case "assistant":
-      return <AssistantMessage entry={entry} />;
+      return viewMode === "conversation"
+        ? <ConversationAssistantMessage entry={entry} />
+        : <AssistantMessage entry={entry} />;
     case "system":
       return <SystemMessage entry={entry} />;
     case "progress":
@@ -295,6 +293,41 @@ function AssistantMessage({ entry }: { entry: TranscriptEntry }) {
         )}
         {blocks.map((block, i) => (
           <AssistantBlock key={i} block={block} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConversationAssistantMessage({ entry }: { entry: TranscriptEntry }) {
+  const content = entry.message?.content;
+  const blocks: ContentBlock[] = Array.isArray(content)
+    ? (content as ContentBlock[])
+    : typeof content === "string"
+      ? [{ type: "text" as const, text: content }]
+      : [];
+
+  const textBlocks = blocks.filter((b): b is { type: "text"; text: string } => b.type === "text");
+  if (textBlocks.length === 0) return null;
+
+  const model = entry.message?.model;
+
+  return (
+    <div className="flex justify-start items-start gap-2 my-1">
+      <div className="size-6 rounded-full bg-foreground text-background flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+        AI
+      </div>
+      <div className="max-w-[85%] flex flex-col gap-1.5">
+        {model && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground font-mono">{model}</span>
+            <Timestamp value={entry.timestamp} />
+          </div>
+        )}
+        {textBlocks.map((block, i) => (
+          <div key={i} className="bg-card border rounded-2xl rounded-tl-md px-4 py-2.5 text-sm whitespace-pre-wrap break-words shadow-sm leading-relaxed">
+            {block.text}
+          </div>
         ))}
       </div>
     </div>

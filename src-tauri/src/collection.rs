@@ -140,6 +140,13 @@ pub struct EventItem {
 }
 
 #[derive(Debug, Deserialize)]
+struct SessionsQuery {
+    source: Option<String>,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct EventQuery {
     pub session_id: String,
     pub from_ms: Option<i64>,
@@ -294,6 +301,27 @@ struct AiTrackingCommitsQuery {
     page_size: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct DashboardActivityQuery {
+    days: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct DailyActivity {
+    date: String,
+    session_count: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct DashboardActivityResponse {
+    daily: Vec<DailyActivity>,
+    total_sessions: i64,
+    total_input_tokens: i64,
+    total_output_tokens: i64,
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message, error_code, retryable) = match self {
@@ -432,6 +460,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/app-config", get(handlers::get_app_config))
         .route("/configs", get(handlers::get_configs))
         .route("/configs/{id}/content", get(handlers::get_config_content))
+        .route("/dashboard/activity", get(handlers::get_dashboard_activity))
         .layer(cors)
         .with_state(state)
 }

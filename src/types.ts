@@ -192,6 +192,62 @@ export type ConfigContentResponse = {
   content_type: "json" | "markdown" | "text";
 };
 
+// ── Transcript parsed types ──
+
+export type TranscriptEntry = {
+  type: string;
+  subtype?: string;
+  timestamp?: string;
+  uuid?: string;
+  parentUuid?: string | null;
+  isSidechain?: boolean;
+  message?: MessagePayload;
+  data?: ProgressData;
+  hookCount?: number;
+  hookInfos?: { command: string; durationMs: number }[];
+  level?: string;
+  stopReason?: string;
+  hasOutput?: boolean;
+  [key: string]: unknown;
+};
+
+export type MessagePayload = {
+  role?: string;
+  model?: string;
+  content?: string | ContentBlock[];
+  stop_reason?: string;
+  usage?: Record<string, unknown>;
+};
+
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string }
+  | { type: "tool_use"; name: string; id: string; input: Record<string, unknown> }
+  | { type: "tool_result"; content: string; tool_use_id: string };
+
+export type ProgressData = {
+  type?: string;
+  hookEvent?: string;
+  hookName?: string;
+  command?: string;
+};
+
+// ── Dashboard types ──
+
+export type DailyActivity = {
+  date: string;
+  session_count: number;
+  input_tokens: number;
+  output_tokens: number;
+};
+
+export type DashboardActivityResponse = {
+  daily: DailyActivity[];
+  total_sessions: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+};
+
 // ── Cursor AI tracking types ──
 
 export type ScoredCommit = {

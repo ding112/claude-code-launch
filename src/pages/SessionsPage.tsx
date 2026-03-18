@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from "react";
 import TranscriptView from "../TranscriptView";
 import type { TimeRange } from "../TranscriptView";
-import { useSessions } from "../hooks/useSessions";
+import { useSessions, type DateRangePreset } from "../hooks/useSessions";
 import { useEvents } from "../hooks/useEvents";
 import { useTranscript } from "../hooks/useTranscript";
 import { formatTimestamp } from "../utils";
@@ -17,6 +17,18 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+const SOURCE_OPTIONS: { value: string | undefined; label: string }[] = [
+  { value: undefined, label: "全部" },
+  { value: "claude-code", label: "Claude Code" },
+  { value: "cursor", label: "Cursor" },
+];
+
+const DATE_OPTIONS: { value: DateRangePreset; label: string }[] = [
+  { value: "7d", label: "近 7 天" },
+  { value: "30d", label: "近 30 天" },
+  { value: "all", label: "全部" },
+];
+
 export default function SessionsPage() {
   const {
     selectedSessionId,
@@ -28,6 +40,10 @@ export default function SessionsPage() {
     archiving,
     discovering,
     sessionMessage,
+    sourceFilter,
+    setSourceFilter,
+    datePreset,
+    setDatePreset,
     toggleProject,
     loadSessions,
     archiveSelectedSession,
@@ -62,6 +78,18 @@ export default function SessionsPage() {
     void loadEvents(selectedSessionId, range.minMs, range.maxMs);
   }, [selectedSessionId, loadEvents]);
 
+  const handleSourceChange = (value: string | undefined) => {
+    setSourceFilter(value);
+    setTimeout(() => void loadSessions(), 0);
+  };
+
+  const handleDateChange = (value: DateRangePreset) => {
+    setDatePreset(value);
+    setTimeout(() => void loadSessions(), 0);
+  };
+
+  const sessionCount = Object.values(groupedSessions).reduce((sum, g) => sum + g.length, 0);
+
   return (
     <section className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6 flex-1 min-h-0 items-stretch p-6 overflow-hidden">
       <Card className="overflow-y-auto min-w-0">
@@ -84,8 +112,43 @@ export default function SessionsPage() {
           </CardAction>
         </CardHeader>
         <CardContent>
-          {loading ? <p className="text-muted-foreground">加载中...</p> : null}
+          {/* Filter bar */}
+          <div className="flex flex-col gap-2 mb-4">
+            <div className="flex gap-1 flex-wrap">
+              {SOURCE_OPTIONS.map((opt) => (
+                <Button
+                  key={opt.label}
+                  variant={sourceFilter === opt.value ? "default" : "outline"}
+                  size="sm"
+                  className="text-xs h-7 px-2.5"
+                  onClick={() => handleSourceChange(opt.value)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+            <div className="flex gap-1 flex-wrap">
+              {DATE_OPTIONS.map((opt) => (
+                <Button
+                  key={opt.value}
+                  variant={datePreset === opt.value ? "default" : "outline"}
+                  size="sm"
+                  className="text-xs h-7 px-2.5"
+                  onClick={() => handleDateChange(opt.value)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+            <span className="text-[11px] text-muted-foreground">
+              {loading ? "加载中..." : `${sessionCount} 个会话`}
+            </span>
+          </div>
+
           <div className="flex flex-col gap-5">
+            {!loading && sessionCount === 0 && (
+              <p className="text-sm text-muted-foreground">无匹配会话</p>
+            )}
             {Object.entries(groupedSessions).map(([projectName, projectSessions]) => {
               const isCollapsed = collapsedProjects[projectName];
               return (
