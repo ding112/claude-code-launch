@@ -27,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         error
     })?;
     let db_path = app_cfg.db_path;
+    let event_enabled = app_cfg.event_enabled;
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -43,6 +44,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("sqlite db path: {abs_db_path}");
     println!("local api listening on http://{addr}");
-    collection::serve(addr, db_path).await?;
+    collection::serve(addr, db_path, event_enabled).await?;
     Ok(())
 }

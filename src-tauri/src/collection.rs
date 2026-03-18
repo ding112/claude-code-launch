@@ -50,10 +50,11 @@ pub struct AppState {
     eval_counter: Arc<AtomicU64>,
     eval_config_cache: Arc<RwLock<EvalConfig>>,
     transcript_register_tx: mpsc::Sender<transcript::TranscriptRegisterRequest>,
+    event_enabled: bool,
 }
 
 impl AppState {
-    fn init_from_connection(db: Connection) -> Result<Self, String> {
+    fn init_from_connection(db: Connection, event_enabled: bool) -> Result<Self, String> {
         db::init_schema(&db).map_err(|error| format!("failed to init sqlite schema: {error:?}"))?;
         let eval_config = db::load_eval_config(&db)
             .map_err(|error| format!("failed to load eval config from sqlite: {error:?}"))?;
@@ -82,20 +83,21 @@ impl AppState {
             eval_counter,
             eval_config_cache,
             transcript_register_tx,
+            event_enabled,
         })
     }
 
-    pub fn new(db_path: &str) -> Result<Self, String> {
+    pub fn new(db_path: &str, event_enabled: bool) -> Result<Self, String> {
         let db = Connection::open(db_path)
             .map_err(|error| format!("failed to open sqlite db at {db_path}: {error:?}"))?;
-        Self::init_from_connection(db)
+        Self::init_from_connection(db, event_enabled)
     }
 
     #[cfg(test)]
     fn new_in_memory() -> Result<Self, String> {
         let db = Connection::open_in_memory()
             .map_err(|error| format!("failed to open sqlite in-memory db: {error:?}"))?;
-        Self::init_from_connection(db)
+        Self::init_from_connection(db, true)
     }
 }
 
@@ -119,6 +121,11 @@ pub struct IncomingEvent {
 pub struct EventAck {
     pub accepted: bool,
     pub event_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AppConfigResponse {
+    pub event_enabled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -412,6 +419,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/hooks/init", post(handlers::init_hooks))
         .route("/cursor/ai-tracking/commits", get(handlers::get_ai_tracking_commits))
         .route("/cursor/ai-tracking/stats", get(handlers::get_ai_tracking_stats))
+        .route("/app-config", get(handlers::get_app_config))
         .layer(cors)
         .with_state(state)
 }
@@ -436,8 +444,8 @@ fn parse_allowed_origins() -> Vec<HeaderValue> {
     ]
 }
 
-pub async fn serve(addr: SocketAddr, db_path: String) -> Result<(), std::io::Error> {
-    let state = AppState::new(&db_path).map_err(std::io::Error::other)?;
+pub async fn serve(addr: SocketAddr, db_path: String, event_enabled: bool) -> Result<(), std::io::Error> {
+    let state = AppState::new(&db_path, event_enabled).map_err(std::io::Error::other)?;
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await
@@ -1501,6 +1509,7 @@ mod tests {
             eval_counter: Arc::new(AtomicU64::new(0)),
             eval_config_cache: Arc::new(RwLock::new(EvalConfig::default())),
             transcript_register_tx,
+            event_enabled: true,
         };
         let app = build_router(state);
 
