@@ -22,19 +22,23 @@
 - ✓ LLM 评估集成（OpenAI、Anthropic、Ollama）— existing
 - ✓ 设置页面（评估配置）— existing
 - ✓ 安装向导（Node.js、npm、Claude Code 检测与安装）— existing
+- ✓ 原子写入与备份清理 — v1.0
+- ✓ JSONL 容错解析 — v1.0
+- ✓ Claude Code 配置发现与只读查看 — v1.0
+- ✓ Cursor 配置发现与只读查看 — v1.0
+- ✓ 默认仪表盘展示开发活动概览 — v1.0
+- ✓ AI 对话历史浏览（多来源支持）— v1.0
+- ✓ Token 用量统计与图表展示 — v1.0
 
 ### Active
 
-- [ ] 总览仪表盘——展示最近开发活动、配置状态概览、关键统计
-- [ ] Claude Code 配置管理——查看、编辑 CLAUDE.md、commands、hooks、settings.json
-- [ ] Cursor 配置管理——查看、编辑 rules、skills、MCP 配置
-- [ ] 配置全局视图——一目了然哪些配置已启用、哪些可用
+- [ ] 配置编辑功能——UI 上直接编辑配置文件
+- [ ] MCP 配置管理——查看、编辑 MCP 配置
 - [ ] 配置导入导出——在项目间迁移配置
 - [ ] 配置模板——常用配置的预设模板
-- [ ] 交互记录浏览——完整对话历史（提示词 + AI 回复）
 - [ ] AI 操作记录——文件修改、命令执行等操作追踪
-- [ ] 统计分析——时间、token 用量、成功率等指标
 - [ ] 编程模式发现——分析交互数据，发现可改进的工作流模式
+- [ ] 成本估算——按模型定价计算 Token 成本
 
 ### Out of Scope
 
@@ -46,13 +50,14 @@
 
 ## Context
 
+- **Shipped v1.0** (2026-03-18): 5 phases, 16 requirements complete
 - 当前项目已有 Claude Code 会话监控和 Cursor transcript 读取的基础能力
 - 项目定位从"监控工具"转向"AI 辅助开发管理平台"
 - Claude Code 的配置散落在 `.claude/` 目录下（CLAUDE.md、commands/、hooks/、settings.json）
 - Cursor 的配置在 `.cursor/rules/`、`.cursor/skills/`、MCP 配置等位置
 - 交互记录数据源：Claude Code 的 transcript 文件、Cursor 的 agent-transcripts/*.jsonl
 - 目标用户：使用 Claude Code 和 Cursor 进行 AI 辅助开发的开发者
-- 技术栈保持不变：Tauri 2 + React + Rust + SQLite
+- 技术栈：Tauri 2 + React + Rust + SQLite (~12,700 LOC)
 
 ## Constraints
 
@@ -65,10 +70,13 @@
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| 重新定位为 AI 辅助开发管理平台 | 从单纯监控扩展到配置管理+交互分析，提供更大价值 | — Pending |
-| 统一管理 Claude Code 和 Cursor 配置 | 两者配置分散，统一视图降低认知负担 | — Pending |
-| 读取本地文件而非 hook 上报 | 减少侵入性，不需要修改用户的开发环境配置 | — Pending |
-| 仪表盘作为首要入口 | 用户打开就能看到全貌，降低使用门槛 | — Pending |
+| 重新定位为 AI 辅助开发管理平台 | 从单纯监控扩展到配置管理+交互分析，提供更大价值 | ✓ Good — v1.0 成功交付 |
+| 统一管理 Claude Code 和 Cursor 配置 | 两者配置分散，统一视图降低认知负担 | ✓ Good — ConfigPage 实现 |
+| 读取本地文件而非 hook 上报 | 减少侵入性，不需要修改用户的开发环境配置 | ✓ Good — 发现历史功能 |
+| 仪表盘作为首要入口 | 用户打开就能看到全貌，降低使用门槛 | ✓ Good — 默认路由 |
+| 原子写入使用 tempfile crate | 跨平台支持，已有成熟实现 | ✓ Good — hooks.rs 集成 |
+| JSONL 容错在 API 层验证 | 存储层保持原始，读取时过滤 | ✓ Good — skipped_lines 返回 |
+| 复用 sessions 表做 Token 统计 | 无需新建表，SQL 聚合足够 | ✓ Good — 性能可接受 |
 
 ---
-*Last updated: 2026-03-18 after initialization*
+*Last updated: 2026-03-18 after v1.0 milestone*
