@@ -13,6 +13,7 @@ import type {
   ConfigsResponse,
   ConfigContentResponse,
   DashboardActivityResponse,
+  TokenStatsResponse,
 } from "./types";
 
 async function assertOk(response: Response): Promise<Response> {
@@ -194,4 +195,19 @@ export async function fetchDashboardActivity(days?: number): Promise<DashboardAc
     await fetch(`${API_BASE}/dashboard/activity${params}`),
   );
   return (await response.json()) as DashboardActivityResponse;
+}
+
+export async function fetchTokenStats(opts?: {
+  fromMs?: number;
+  toMs?: number;
+  source?: string;
+}): Promise<TokenStatsResponse> {
+  const params = new URLSearchParams();
+  if (opts?.fromMs != null) params.set("from_ms", String(opts.fromMs));
+  if (opts?.toMs != null) params.set("to_ms", String(opts.toMs));
+  if (opts?.source) params.set("source", opts.source);
+  const qs = params.toString();
+  const url = qs ? `${API_BASE}/stats/tokens?${qs}` : `${API_BASE}/stats/tokens`;
+  const response = await assertOk(await fetch(url));
+  return (await response.json()) as TokenStatsResponse;
 }

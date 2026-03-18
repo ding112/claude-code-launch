@@ -978,6 +978,159 @@ pub(super) async fn get_dashboard_activity(
     }))
 }
 
+pub(super) async fn get_token_stats(
+    State(state): State<AppState>,
+    Query(query): Query<TokenStatsQuery>,
+) -> Result<Json<TokenStatsResponse>, ApiError> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut bind_values: Vec<SqlValue> = Vec::new();
+
+    if let Some(from_ms) = query.from_ms {
+        conditions.push(format!("last_active_at_ms >= ?{}", bind_values.len() + 1));
+        bind_values.push(SqlValue::Integer(from_ms));
+    }
+    if let Some(to_ms) = query.to_ms {
+        conditions.push(format!("last_active_at_ms <= ?{}", bind_values.len() + 1));
+        bind_values.push(SqlValue::Integer(to_ms));
+    }
+    if let Some(ref source) = query.source {
+        conditions.push(format!("source = ?{}", bind_values.len() + 1));
+        bind_values.push(SqlValue::Text(source.clone()));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let daily_sql = format!(
+        "SELECT
+            date(last_active_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+            COUNT(*) AS session_count,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens
+        FROM sessions
+        {where_clause}
+        GROUP BY date
+        ORDER BY date ASC"
+    );
+
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        bind_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+
+    let mut daily_stmt = db
+        .prepare(&daily_sql)
+        .map_err(|error| ApiError::Internal(format!("failed to prepare token stats daily query: {error:?}")))?;
+    let mut daily_rows = daily_stmt
+        .query(params_ref.as_slice())
+        .map_err(|error| ApiError::Internal(format!("failed to execute token stats daily query: {error:?}")))?;
+
+    let mut daily = Vec::new();
+    while let Some(row) = daily_rows
+        .next()
+        .map_err(|error| ApiError::Internal(format!("failed to read token stats daily row: {error:?}")))?
+    {
+        daily.push(TokenDailyStat {
+            date: row.get(0).unwrap_or_default(),
+            session_count: row.get(1).unwrap_or(0),
+            input_tokens: row.get(2).unwrap_or(0),
+            output_tokens: row.get(3).unwrap_or(0),
+        });
+    }
+    drop(daily_rows);
+    drop(daily_stmt);
+
+    let sessions_sql = format!(
+        "SELECT session_id, project_name, agent_type, source,
+                input_tokens, output_tokens, last_active_at_ms, first_prompt
+        FROM sessions
+        {where_clause}
+        ORDER BY (input_tokens + output_tokens) DESC, last_active_at_ms DESC"
+    );
+
+    let params_ref2: Vec<&dyn rusqlite::types::ToSql> =
+        bind_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+
+    let mut sessions_stmt = db
+        .prepare(&sessions_sql)
+        .map_err(|error| ApiError::Internal(format!("failed to prepare token stats sessions query: {error:?}")))?;
+    let mut session_rows = sessions_stmt
+        .query(params_ref2.as_slice())
+        .map_err(|error| ApiError::Internal(format!("failed to execute token stats sessions query: {error:?}")))?;
+
+    let mut sessions = Vec::new();
+    while let Some(row) = session_rows
+        .next()
+        .map_err(|error| ApiError::Internal(format!("failed to read token stats session row: {error:?}")))?
+    {
+        sessions.push(TokenSessionStat {
+            session_id: row.get(0).unwrap_or_default(),
+            project_name: row.get(1).unwrap_or_default(),
+            agent_type: row.get(2).unwrap_or_default(),
+            source: row.get(3).unwrap_or_default(),
+            input_tokens: row.get(4).unwrap_or(0),
+            output_tokens: row.get(5).unwrap_or(0),
+            last_active_at_ms: row.get(6).unwrap_or(0),
+            first_prompt: row.get(7).unwrap_or_default(),
+        });
+    }
+    drop(session_rows);
+    drop(sessions_stmt);
+
+    let totals_sql = format!(
+        "SELECT
+            COALESCE(SUM(input_tokens), 0),
+            COALESCE(SUM(output_tokens), 0),
+            COUNT(*)
+        FROM sessions
+        {where_clause}"
+    );
+
+    let params_ref3: Vec<&dyn rusqlite::types::ToSql> =
+        bind_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+
+    let mut totals_stmt = db
+        .prepare(&totals_sql)
+        .map_err(|error| ApiError::Internal(format!("failed to prepare token stats totals query: {error:?}")))?;
+    let mut totals_rows = totals_stmt
+        .query(params_ref3.as_slice())
+        .map_err(|error| ApiError::Internal(format!("failed to execute token stats totals query: {error:?}")))?;
+
+    let (total_input_tokens, total_output_tokens, total_sessions) = if let Some(row) = totals_rows
+        .next()
+        .map_err(|error| ApiError::Internal(format!("failed to read token stats totals row: {error:?}")))?
+    {
+        (
+            row.get::<_, i64>(0).unwrap_or(0),
+            row.get::<_, i64>(1).unwrap_or(0),
+            row.get::<_, i64>(2).unwrap_or(0),
+        )
+    } else {
+        (0, 0, 0)
+    };
+
+    let avg_tokens_per_session = if total_sessions > 0 {
+        (total_input_tokens + total_output_tokens) / total_sessions
+    } else {
+        0
+    };
+
+    Ok(Json(TokenStatsResponse {
+        daily,
+        sessions,
+        total_input_tokens,
+        total_output_tokens,
+        total_sessions,
+        avg_tokens_per_session,
+    }))
+}
+
 pub(super) async fn get_config_content(
     axum::extract::Path(config_id): axum::extract::Path<String>,
 ) -> Result<Json<config_scanner::ConfigContentResponse>, ApiError> {

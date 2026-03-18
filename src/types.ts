@@ -291,3 +291,32 @@ export type AiTrackingStats = {
   avg_ai_percentage: number;
   model_distribution: ModelStat[];
 };
+
+// ── Statistics types ──
+
+export type TokenDailyStat = {
+  date: string;
+  session_count: number;
+  input_tokens: number;
+  output_tokens: number;
+};
+
+export type TokenSessionStat = {
+  session_id: string;
+  project_name: string;
+  agent_type: string;
+  source: string;
+  input_tokens: number;
+  output_tokens: number;
+  last_active_at_ms: number;
+  first_prompt: string;
+};
+
+export type TokenStatsResponse = {
+  daily: TokenDailyStat[];
+  sessions: TokenSessionStat[];
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_sessions: number;
+  avg_tokens_per_session: number;
+};

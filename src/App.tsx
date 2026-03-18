@@ -5,6 +5,7 @@ import TabSwitcher, { type Tab } from "./components/TabSwitcher";
 import DashboardPage from "./pages/DashboardPage";
 import SessionsPage from "./pages/SessionsPage";
 import ConfigPage from "./pages/ConfigPage";
+import StatsPage from "./pages/StatsPage";
 import SettingsPage from "./pages/SettingsPage";
 import SetupPage from "./pages/SetupPage";
 import type { LogEvent, PrereqResult } from "./types";
@@ -77,6 +78,7 @@ function App() {
       {tab === "dashboard" && <DashboardPage onNavigate={setTab} />}
       {tab === "sessions" && <SessionsPage />}
       {tab === "config" && <ConfigPage />}
+      {tab === "stats" && <StatsPage />}
       {tab === "settings" && <SettingsPage />}
       {tab === "setup" && (
         <SetupPage logs={logs} initialPrereqs={initialPrereqs} />

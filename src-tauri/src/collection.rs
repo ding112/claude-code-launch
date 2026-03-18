@@ -322,6 +322,43 @@ struct DashboardActivityResponse {
     total_output_tokens: i64,
 }
 
+#[derive(Debug, Deserialize)]
+struct TokenStatsQuery {
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+    source: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenDailyStat {
+    date: String,
+    session_count: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenSessionStat {
+    session_id: String,
+    project_name: String,
+    agent_type: String,
+    source: String,
+    input_tokens: i64,
+    output_tokens: i64,
+    last_active_at_ms: i64,
+    first_prompt: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenStatsResponse {
+    daily: Vec<TokenDailyStat>,
+    sessions: Vec<TokenSessionStat>,
+    total_input_tokens: i64,
+    total_output_tokens: i64,
+    total_sessions: i64,
+    avg_tokens_per_session: i64,
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message, error_code, retryable) = match self {
@@ -461,6 +498,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/configs", get(handlers::get_configs))
         .route("/configs/{id}/content", get(handlers::get_config_content))
         .route("/dashboard/activity", get(handlers::get_dashboard_activity))
+        .route("/stats/tokens", get(handlers::get_token_stats))
         .layer(cors)
         .with_state(state)
 }
