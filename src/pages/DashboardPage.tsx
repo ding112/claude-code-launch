@@ -12,44 +12,12 @@ import {
 import { useDashboard } from "../hooks/useDashboard";
 import type { Tab } from "../components/TabSwitcher";
 import type { SessionItem } from "../types";
-import { formatTimestamp } from "../utils";
+import { formatTimestamp, formatTokens, formatDateShort } from "../utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { KpiCard } from "@/components/KpiCard";
 import { cn } from "@/lib/utils";
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
-
-function KpiCard({
-  title,
-  value,
-  subtitle,
-}: {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="pt-6">
-        <p className="text-sm font-medium text-muted-foreground">{title}</p>
-        <p className="text-3xl font-bold tracking-tight mt-1">{value}</p>
-        {subtitle && (
-          <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
 
 function SessionCard({ session }: { session: SessionItem }) {
   return (
@@ -117,7 +85,7 @@ export default function DashboardPage({
   }
 
   const chartData = dailyActivity.map((d) => ({
-    date: formatDate(d.date),
+    date: formatDateShort(d.date),
     sessions: d.session_count,
     tokens: d.input_tokens + d.output_tokens,
   }));

@@ -13,10 +13,11 @@ import {
 } from "recharts";
 import { useTokenStats, type TimeRange } from "../hooks/useTokenStats";
 import type { TokenSessionStat } from "../types";
-import { formatTimestamp } from "../utils";
+import { formatTimestamp, formatTokens, formatDateShort, tokenDisplay } from "../utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { KpiCard } from "@/components/KpiCard";
+import { SourceBadge } from "@/components/SourceBadge";
 import {
   Select,
   SelectContent,
@@ -26,40 +27,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
-
-function KpiCard({
-  title,
-  value,
-  subtitle,
-}: {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="pt-6">
-        <p className="text-sm font-medium text-muted-foreground">{title}</p>
-        <p className="text-3xl font-bold tracking-tight mt-1">{value}</p>
-        {subtitle && (
-          <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
 
 const TIME_RANGES: { id: TimeRange; label: string }[] = [
   { id: "7d", label: "7 天" },
@@ -70,10 +37,6 @@ const TIME_RANGES: { id: TimeRange; label: string }[] = [
 
 type ChartMode = "bar" | "line";
 type SortField = "total_tokens" | "input_tokens" | "output_tokens" | "last_active_at_ms";
-
-function tokenDisplay(n: number): string {
-  return n > 0 ? formatTokens(n) : "—";
-}
 
 export default function StatsPage() {
   const {
@@ -97,7 +60,7 @@ export default function StatsPage() {
   const chartData = useMemo(
     () =>
       (data?.daily ?? []).map((d) => ({
-        date: formatDate(d.date),
+        date: formatDateShort(d.date),
         input_tokens: d.input_tokens,
         output_tokens: d.output_tokens,
         session_count: d.session_count,
@@ -454,18 +417,7 @@ function SessionRow({ session }: { session: TokenSessionStat }) {
         </div>
       </td>
       <td className="px-4 py-2.5">
-        <Badge
-          variant="secondary"
-          className={cn(
-            "text-[10px] px-1.5 py-0",
-            session.source === "cursor" &&
-              "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-            (session.source === "claude-code" || session.source === "discovery") &&
-              "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
-          )}
-        >
-          {session.agent_type || session.source}
-        </Badge>
+        <SourceBadge source={session.source} />
       </td>
       <td className="px-4 py-2.5 font-mono text-xs text-right">
         {tokenDisplay(session.input_tokens)}

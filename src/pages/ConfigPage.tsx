@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { SourceBadge } from "@/components/SourceBadge";
 import { cn } from "@/lib/utils";
 
 const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
@@ -191,21 +192,6 @@ function ConfigListItem({
         </div>
       </button>
     </li>
-  );
-}
-
-function SourceBadge({ source }: { source: string }) {
-  return (
-    <Badge
-      variant="secondary"
-      className={cn(
-        "text-[10px] px-1.5 py-0",
-        source === "claude" && "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
-        source === "cursor" && "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-      )}
-    >
-      {source}
-    </Badge>
   );
 }
 
