@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import TabSwitcher, { type Tab } from "./components/TabSwitcher";
 import SessionsPage from "./pages/SessionsPage";
+import ConfigPage from "./pages/ConfigPage";
 import SettingsPage from "./pages/SettingsPage";
 import SetupPage from "./pages/SetupPage";
 import type { LogEvent, PrereqResult } from "./types";
@@ -73,6 +74,7 @@ function App() {
       </header>
 
       {tab === "sessions" && <SessionsPage />}
+      {tab === "config" && <ConfigPage />}
       {tab === "settings" && <SettingsPage />}
       {tab === "setup" && (
         <SetupPage logs={logs} initialPrereqs={initialPrereqs} />

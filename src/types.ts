@@ -164,6 +164,34 @@ export type AppConfigData = {
   event_enabled: boolean;
 };
 
+// ── Config discovery types ──
+
+export type ConfigItem = {
+  id: string;
+  source: "claude" | "cursor";
+  name: string;
+  category: string;
+  scope: "global" | "project";
+  project_path?: string;
+  file_path: string;
+  status: "active" | "missing";
+  size_bytes?: number;
+  last_modified_ms?: number;
+};
+
+export type ConfigsResponse = {
+  items: ConfigItem[];
+  project_count: number;
+};
+
+export type ConfigContentResponse = {
+  id: string;
+  name: string;
+  file_path: string;
+  content: string;
+  content_type: "json" | "markdown" | "text";
+};
+
 // ── Cursor AI tracking types ──
 
 export type ScoredCommit = {

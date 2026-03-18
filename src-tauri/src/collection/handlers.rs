@@ -865,3 +865,40 @@ pub(super) async fn get_app_config(
         event_enabled: state.event_enabled,
     })
 }
+
+#[derive(Deserialize)]
+pub(super) struct ConfigsQuery {
+    source: Option<String>,
+}
+
+pub(super) async fn get_configs(
+    Query(params): Query<ConfigsQuery>,
+) -> Result<Json<config_scanner::ConfigsResponse>, ApiError> {
+    let project_paths = config_scanner::discover_project_paths();
+    let mut items = config_scanner::scan_all_configs(&project_paths);
+
+    if let Some(source) = &params.source {
+        items.retain(|item| item.source == *source);
+    }
+
+    let project_count = project_paths.len();
+    Ok(Json(config_scanner::ConfigsResponse {
+        items,
+        project_count,
+    }))
+}
+
+pub(super) async fn get_config_content(
+    axum::extract::Path(config_id): axum::extract::Path<String>,
+) -> Result<Json<config_scanner::ConfigContentResponse>, ApiError> {
+    let project_paths = config_scanner::discover_project_paths();
+    let items = config_scanner::scan_all_configs(&project_paths);
+    let item = items
+        .iter()
+        .find(|i| i.id == config_id)
+        .ok_or_else(|| ApiError::NotFound(format!("config not found: {config_id}")))?;
+
+    config_scanner::read_config_content(item)
+        .map(Json)
+        .map_err(ApiError::Internal)
+}

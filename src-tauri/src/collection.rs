@@ -36,6 +36,8 @@ mod discovery;
 mod cursor_discovery;
 #[path = "collection/cursor_ai_tracking.rs"]
 mod cursor_ai_tracking;
+#[path = "collection/config_scanner.rs"]
+mod config_scanner;
 #[path = "collection/transcript.rs"]
 mod transcript;
 #[path = "collection/transcript_poller.rs"]
@@ -228,6 +230,7 @@ pub struct ApiErrorBody {
 #[derive(Debug)]
 enum ApiError {
     BadRequest(String),
+    NotFound(String),
     Internal(String),
     QueueFull(String),
 }
@@ -298,6 +301,12 @@ impl IntoResponse for ApiError {
                 StatusCode::BAD_REQUEST,
                 message,
                 "bad_request".to_string(),
+                false,
+            ),
+            Self::NotFound(message) => (
+                StatusCode::NOT_FOUND,
+                message,
+                "not_found".to_string(),
                 false,
             ),
             Self::Internal(message) => (
@@ -421,6 +430,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/cursor/ai-tracking/commits", get(handlers::get_ai_tracking_commits))
         .route("/cursor/ai-tracking/stats", get(handlers::get_ai_tracking_stats))
         .route("/app-config", get(handlers::get_app_config))
+        .route("/configs", get(handlers::get_configs))
+        .route("/configs/{id}/content", get(handlers::get_config_content))
         .layer(cors)
         .with_state(state)
 }

@@ -10,6 +10,8 @@ import type {
   ScoredCommitsResponse,
   AiTrackingStats,
   AppConfigData,
+  ConfigsResponse,
+  ConfigContentResponse,
 } from "./types";
 
 async function assertOk(response: Response): Promise<Response> {
@@ -160,4 +162,17 @@ export async function fetchAiTrackingStats(): Promise<AiTrackingStats> {
 export async function fetchAppConfig(): Promise<AppConfigData> {
   const response = await assertOk(await fetch(`${API_BASE}/app-config`));
   return (await response.json()) as AppConfigData;
+}
+
+export async function fetchConfigs(source?: string): Promise<ConfigsResponse> {
+  const params = source ? `?source=${encodeURIComponent(source)}` : "";
+  const response = await assertOk(await fetch(`${API_BASE}/configs${params}`));
+  return (await response.json()) as ConfigsResponse;
+}
+
+export async function fetchConfigContent(id: string): Promise<ConfigContentResponse> {
+  const response = await assertOk(
+    await fetch(`${API_BASE}/configs/${encodeURIComponent(id)}/content`),
+  );
+  return (await response.json()) as ConfigContentResponse;
 }

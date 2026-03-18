@@ -1,9 +1,10 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-export type Tab = "sessions" | "settings" | "setup";
+export type Tab = "sessions" | "config" | "settings" | "setup";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "sessions", label: "Sessions" },
+  { id: "config", label: "Config" },
   { id: "settings", label: "Settings" },
   { id: "setup", label: "Setup" },
 ];
