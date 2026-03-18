@@ -43,3 +43,5 @@ openspec
 # AI skill configs
 .agents/skills/shadcn/
 .cursor/plans/
+.claude/
+.planning/

@@ -105,11 +105,14 @@ export function useTranscript(selectedSessionId: string) {
     [],
   );
 
+  const skippedLines = transcript?.skipped_lines ?? 0;
+
   return {
     transcript,
     transcriptLoading,
     transcriptLoadingMore,
     transcriptError,
+    skippedLines,
     handleTranscriptScroll,
   };
 }

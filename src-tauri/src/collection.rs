@@ -154,7 +154,7 @@ struct TranscriptQuery {
     page_size: Option<u32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct TranscriptLineItem {
     line_no: i64,
     line_content: String,
@@ -170,6 +170,7 @@ struct TranscriptItem {
     imported_offset_bytes: i64,
     last_error_message: Option<String>,
     last_error_stack: Option<String>,
+    skipped_lines: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -504,6 +505,34 @@ fn now_timestamp_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+/// Atomic write: write to temp file in the same directory → fsync → rename to target.
+/// Guarantees the target file is either the old content or the complete new content,
+/// never truncated or partially written.
+fn atomic_write(target: &std::path::Path, content: &[u8]) -> Result<(), String> {
+    let parent = target.parent().ok_or_else(|| {
+        format!("cannot determine parent directory for {}", target.display())
+    })?;
+
+    std::fs::create_dir_all(parent)
+        .map_err(|e| format!("failed to create parent dirs for {}: {e}", target.display()))?;
+
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("failed to create temp file in {}: {e}", parent.display()))?;
+
+    std::io::Write::write_all(&mut tmp, content)
+        .map_err(|e| format!("failed to write temp file for {}: {e}", target.display()))?;
+
+    tmp.as_file()
+        .sync_all()
+        .map_err(|e| format!("failed to fsync temp file for {}: {e}", target.display()))?;
+
+    tmp.persist(target).map_err(|e| {
+        format!("failed to rename temp file to {}: {e}", target.display())
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]

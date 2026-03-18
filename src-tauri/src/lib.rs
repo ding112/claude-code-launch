@@ -9,6 +9,7 @@ mod services;
 mod app_config;
 mod collection;
 mod evaluation;
+mod logging;
 mod overseer_models;
 
 fn http_server_addr() -> SocketAddr {
@@ -40,6 +41,7 @@ async fn run_http_server(addr: SocketAddr, db_path: String, event_enabled: bool)
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logging::init_logging();
     dao::refresh_path_from_registry();
 
     let server_addr = http_server_addr();

@@ -45,6 +45,7 @@ export default function SessionsPage() {
     transcriptLoading,
     transcriptLoadingMore,
     transcriptError,
+    skippedLines,
     handleTranscriptScroll,
   } = useTranscript(selectedSessionId);
 
@@ -254,6 +255,7 @@ export default function SessionsPage() {
                     events={events}
                     loadingMore={transcriptLoadingMore}
                     hasMore={transcript.has_more}
+                    skippedLines={skippedLines}
                     onScroll={handleTranscriptScroll}
                     onTimeRangeChange={handleTimeRangeChange}
                   />

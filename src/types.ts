@@ -127,6 +127,7 @@ export type TranscriptResponse = {
   imported_offset_bytes: number;
   last_error_message?: string;
   last_error_stack?: string;
+  skipped_lines?: number;
 };
 
 export type EvalSettings = {

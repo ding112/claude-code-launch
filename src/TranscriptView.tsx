@@ -56,6 +56,7 @@ type TranscriptViewProps = {
   events: EventItem[];
   loadingMore: boolean;
   hasMore: boolean;
+  skippedLines?: number;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   onTimeRangeChange?: (range: TimeRange | null) => void;
 };
@@ -148,7 +149,7 @@ function mergeTimeline(records: ParsedRecord[], events: EventItem[]): MergedTime
   return result;
 }
 
-export default function TranscriptView({ items, events, loadingMore, hasMore, onScroll, onTimeRangeChange }: TranscriptViewProps) {
+export default function TranscriptView({ items, events, loadingMore, hasMore, skippedLines, onScroll, onTimeRangeChange }: TranscriptViewProps) {
   const [ascending, setAscending] = useState(true);
   const { records, timeRange } = useMemo(() => parseLines(items), [items]);
   const merged = useMemo(() => {
@@ -196,6 +197,11 @@ export default function TranscriptView({ items, events, loadingMore, hasMore, on
         )}
         {hasMore && !loadingMore && (
           <p className="text-muted-foreground m-0 py-1 text-xs text-center">向下滚动加载更早内容</p>
+        )}
+        {(skippedLines ?? 0) > 0 && (
+          <p className="text-muted-foreground/60 m-0 py-1 text-xs text-center">
+            已跳过 {skippedLines} 行无效数据
+          </p>
         )}
       </div>
     </div>

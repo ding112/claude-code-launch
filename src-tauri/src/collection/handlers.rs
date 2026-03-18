@@ -402,6 +402,7 @@ pub(super) async fn get_transcript(
                 imported_offset_bytes: 0,
                 last_error_message: None,
                 last_error_stack: None,
+                skipped_lines: 0,
             }));
         }
         Err(error) => {
@@ -447,12 +448,12 @@ pub(super) async fn get_transcript(
             .map_err(|error| ApiError::Internal(format!("failed to execute transcript query: {error:?}")))?
     };
 
-    let mut items_desc: Vec<TranscriptLineItem> = Vec::new();
+    let mut all_rows: Vec<TranscriptLineItem> = Vec::new();
     while let Some(row) = rows
         .next()
         .map_err(|error| ApiError::Internal(format!("failed to read transcript row: {error:?}")))?
     {
-        items_desc.push(TranscriptLineItem {
+        all_rows.push(TranscriptLineItem {
             line_no: row.get(0).map_err(|error| {
                 ApiError::Internal(format!("failed to decode transcript line_no: {error:?}"))
             })?,
@@ -462,26 +463,55 @@ pub(super) async fn get_transcript(
         });
     }
 
-    let has_more = items_desc.len() > page_size;
+    let has_more = all_rows.len() > page_size;
     if has_more {
-        items_desc.truncate(page_size);
+        all_rows.truncate(page_size);
     }
-    items_desc.reverse();
+    all_rows.reverse();
     let next_before_line_no = if has_more {
-        items_desc.first().map(|item| item.line_no)
+        all_rows.first().map(|item| item.line_no)
     } else {
         None
     };
 
+    let mut skipped_lines: u32 = 0;
+    let mut valid_items: Vec<TranscriptLineItem> = Vec::with_capacity(all_rows.len());
+    for item in &all_rows {
+        let trimmed = item.line_content.trim();
+        if trimmed.is_empty() {
+            valid_items.push(item.clone());
+            continue;
+        }
+        match serde_json::from_str::<Value>(trimmed) {
+            Ok(val) if val.is_object() => {
+                valid_items.push(item.clone());
+            }
+            _ => {
+                tracing::warn!(
+                    session_id = %query.session_id,
+                    line_no = item.line_no,
+                    "transcript line is not valid JSON object, skipping"
+                );
+                skipped_lines += 1;
+            }
+        }
+    }
+
+    // Fallback: if all lines were invalid, return raw content so the user can at least see something
+    if valid_items.is_empty() && skipped_lines > 0 {
+        valid_items = all_rows;
+    }
+
     Ok(Json(TranscriptItem {
         session_id: query.session_id,
-        items: items_desc,
+        items: valid_items,
         has_more,
         next_before_line_no,
         updated_at_ms,
         imported_offset_bytes,
         last_error_message,
         last_error_stack,
+        skipped_lines,
     }))
 }
 
