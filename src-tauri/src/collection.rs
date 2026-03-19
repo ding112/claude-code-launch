@@ -30,6 +30,14 @@ mod eval_queue;
 mod handlers;
 #[path = "collection/hooks.rs"]
 mod hooks;
+#[path = "collection/discovery.rs"]
+mod discovery;
+#[path = "collection/cursor_discovery.rs"]
+mod cursor_discovery;
+#[path = "collection/cursor_ai_tracking.rs"]
+mod cursor_ai_tracking;
+#[path = "collection/config_scanner.rs"]
+mod config_scanner;
 #[path = "collection/transcript.rs"]
 mod transcript;
 #[path = "collection/transcript_poller.rs"]
@@ -44,10 +52,11 @@ pub struct AppState {
     eval_counter: Arc<AtomicU64>,
     eval_config_cache: Arc<RwLock<EvalConfig>>,
     transcript_register_tx: mpsc::Sender<transcript::TranscriptRegisterRequest>,
+    event_enabled: bool,
 }
 
 impl AppState {
-    fn init_from_connection(db: Connection) -> Result<Self, String> {
+    fn init_from_connection(db: Connection, event_enabled: bool) -> Result<Self, String> {
         db::init_schema(&db).map_err(|error| format!("failed to init sqlite schema: {error:?}"))?;
         let eval_config = db::load_eval_config(&db)
             .map_err(|error| format!("failed to load eval config from sqlite: {error:?}"))?;
@@ -76,20 +85,21 @@ impl AppState {
             eval_counter,
             eval_config_cache,
             transcript_register_tx,
+            event_enabled,
         })
     }
 
-    pub fn new(db_path: &str) -> Result<Self, String> {
+    pub fn new(db_path: &str, event_enabled: bool) -> Result<Self, String> {
         let db = Connection::open(db_path)
             .map_err(|error| format!("failed to open sqlite db at {db_path}: {error:?}"))?;
-        Self::init_from_connection(db)
+        Self::init_from_connection(db, event_enabled)
     }
 
     #[cfg(test)]
     fn new_in_memory() -> Result<Self, String> {
         let db = Connection::open_in_memory()
             .map_err(|error| format!("failed to open sqlite in-memory db: {error:?}"))?;
-        Self::init_from_connection(db)
+        Self::init_from_connection(db, true)
     }
 }
 
@@ -116,12 +126,24 @@ pub struct EventAck {
 }
 
 #[derive(Debug, Serialize)]
+pub struct AppConfigResponse {
+    pub event_enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct EventItem {
     pub event_id: String,
     pub session_id: String,
     pub event_type: String,
     pub payload: Value,
     pub created_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionsQuery {
+    source: Option<String>,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,7 +163,7 @@ struct TranscriptQuery {
     page_size: Option<u32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct TranscriptLineItem {
     line_no: i64,
     line_content: String,
@@ -157,6 +179,7 @@ struct TranscriptItem {
     imported_offset_bytes: i64,
     last_error_message: Option<String>,
     last_error_stack: Option<String>,
+    skipped_lines: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,6 +216,14 @@ pub struct SessionItem {
     pub last_active_at_ms: i64,
     pub latest_risk_level: String,
     pub evaluation_count: u64,
+    pub first_prompt: String,
+    pub duration_minutes: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub goal: String,
+    pub summary: String,
+    pub outcome: String,
+    pub source: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -206,6 +237,7 @@ pub struct ApiErrorBody {
 #[derive(Debug)]
 enum ApiError {
     BadRequest(String),
+    NotFound(String),
     Internal(String),
     QueueFull(String),
 }
@@ -263,6 +295,70 @@ struct EvaluationQueryResponse {
     page_size: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct AiTrackingCommitsQuery {
+    page: Option<u32>,
+    page_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DashboardActivityQuery {
+    days: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct DailyActivity {
+    date: String,
+    session_count: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct DashboardActivityResponse {
+    daily: Vec<DailyActivity>,
+    total_sessions: i64,
+    total_input_tokens: i64,
+    total_output_tokens: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenStatsQuery {
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+    source: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenDailyStat {
+    date: String,
+    session_count: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenSessionStat {
+    session_id: String,
+    project_name: String,
+    agent_type: String,
+    source: String,
+    input_tokens: i64,
+    output_tokens: i64,
+    last_active_at_ms: i64,
+    first_prompt: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenStatsResponse {
+    daily: Vec<TokenDailyStat>,
+    sessions: Vec<TokenSessionStat>,
+    total_input_tokens: i64,
+    total_output_tokens: i64,
+    total_sessions: i64,
+    avg_tokens_per_session: i64,
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message, error_code, retryable) = match self {
@@ -270,6 +366,12 @@ impl IntoResponse for ApiError {
                 StatusCode::BAD_REQUEST,
                 message,
                 "bad_request".to_string(),
+                false,
+            ),
+            Self::NotFound(message) => (
+                StatusCode::NOT_FOUND,
+                message,
+                "not_found".to_string(),
                 false,
             ),
             Self::Internal(message) => (
@@ -383,12 +485,20 @@ pub fn build_router(state: AppState) -> Router {
         .route("/transcripts", get(handlers::get_transcript))
         .route("/transcripts/sync", post(handlers::sync_transcript))
         .route("/sessions/archive", post(handlers::archive_session))
+        .route("/sessions/discover", post(handlers::discover_sessions))
         .route("/events", post(handlers::post_event).get(handlers::get_events))
         .route("/settings", get(handlers::get_settings).post(handlers::save_settings))
         .route("/evaluations", get(handlers::get_evaluations))
         .route("/evaluations/retry", post(handlers::retry_evaluation))
         .route("/hooks", get(handlers::get_hooks).post(handlers::save_hooks))
         .route("/hooks/init", post(handlers::init_hooks))
+        .route("/cursor/ai-tracking/commits", get(handlers::get_ai_tracking_commits))
+        .route("/cursor/ai-tracking/stats", get(handlers::get_ai_tracking_stats))
+        .route("/app-config", get(handlers::get_app_config))
+        .route("/configs", get(handlers::get_configs))
+        .route("/configs/{id}/content", get(handlers::get_config_content))
+        .route("/dashboard/activity", get(handlers::get_dashboard_activity))
+        .route("/stats/tokens", get(handlers::get_token_stats))
         .layer(cors)
         .with_state(state)
 }
@@ -413,8 +523,8 @@ fn parse_allowed_origins() -> Vec<HeaderValue> {
     ]
 }
 
-pub async fn serve(addr: SocketAddr, db_path: String) -> Result<(), std::io::Error> {
-    let state = AppState::new(&db_path).map_err(std::io::Error::other)?;
+pub async fn serve(addr: SocketAddr, db_path: String, event_enabled: bool) -> Result<(), std::io::Error> {
+    let state = AppState::new(&db_path, event_enabled).map_err(std::io::Error::other)?;
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await
@@ -473,6 +583,34 @@ fn now_timestamp_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+/// Atomic write: write to temp file in the same directory → fsync → rename to target.
+/// Guarantees the target file is either the old content or the complete new content,
+/// never truncated or partially written.
+fn atomic_write(target: &std::path::Path, content: &[u8]) -> Result<(), String> {
+    let parent = target.parent().ok_or_else(|| {
+        format!("cannot determine parent directory for {}", target.display())
+    })?;
+
+    std::fs::create_dir_all(parent)
+        .map_err(|e| format!("failed to create parent dirs for {}: {e}", target.display()))?;
+
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("failed to create temp file in {}: {e}", parent.display()))?;
+
+    std::io::Write::write_all(&mut tmp, content)
+        .map_err(|e| format!("failed to write temp file for {}: {e}", target.display()))?;
+
+    tmp.as_file()
+        .sync_all()
+        .map_err(|e| format!("failed to fsync temp file for {}: {e}", target.display()))?;
+
+    tmp.persist(target).map_err(|e| {
+        format!("failed to rename temp file to {}: {e}", target.display())
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1478,6 +1616,7 @@ mod tests {
             eval_counter: Arc::new(AtomicU64::new(0)),
             eval_config_cache: Arc::new(RwLock::new(EvalConfig::default())),
             transcript_register_tx,
+            event_enabled: true,
         };
         let app = build_router(state);
 

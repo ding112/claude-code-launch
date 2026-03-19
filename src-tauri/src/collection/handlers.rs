@@ -11,6 +11,13 @@ pub(super) async fn post_event(
     State(state): State<AppState>,
     Json(mut event): Json<IncomingEvent>,
 ) -> Result<Json<EventAck>, ApiError> {
+    if !state.event_enabled {
+        return Ok(Json(EventAck {
+            accepted: false,
+            event_id: event.event_id,
+        }));
+    }
+
     super::validate_event(&event)?;
     super::sanitize_json_value(&mut event.payload);
 
@@ -182,14 +189,39 @@ pub(super) async fn get_events(
     }))
 }
 
-pub(super) async fn get_sessions(State(state): State<AppState>) -> Result<Json<Vec<SessionItem>>, ApiError> {
+pub(super) async fn get_sessions(
+    State(state): State<AppState>,
+    Query(query): Query<SessionsQuery>,
+) -> Result<Json<Vec<SessionItem>>, ApiError> {
     let db = state
         .db
         .lock()
         .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
 
-    let sql = "
-        SELECT
+    let mut extra_clauses = Vec::new();
+    let mut params: Vec<SqlValue> = Vec::new();
+
+    if let Some(source) = &query.source {
+        extra_clauses.push("s.agent_type = ?".to_string());
+        params.push(SqlValue::Text(source.clone()));
+    }
+    if let Some(from_ms) = query.from_ms {
+        extra_clauses.push("s.last_active_at_ms >= ?".to_string());
+        params.push(SqlValue::Integer(from_ms));
+    }
+    if let Some(to_ms) = query.to_ms {
+        extra_clauses.push("s.last_active_at_ms <= ?".to_string());
+        params.push(SqlValue::Integer(to_ms));
+    }
+
+    let extra_where = if extra_clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", extra_clauses.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT
             s.session_id,
             s.project_name,
             s.agent_type,
@@ -205,22 +237,29 @@ pub(super) async fn get_sessions(State(state): State<AppState>) -> Result<Json<V
                 SELECT COUNT(1)
                 FROM evaluations ev2
                 WHERE ev2.session_id = s.session_id
-            ), 0) AS evaluation_count
+            ), 0) AS evaluation_count,
+            s.first_prompt,
+            s.duration_minutes,
+            s.input_tokens,
+            s.output_tokens,
+            s.goal,
+            s.summary,
+            s.outcome,
+            s.source
         FROM sessions s
-        WHERE EXISTS (
-            SELECT 1
-            FROM events e
-            WHERE e.session_id = s.session_id
-              AND e.is_archived = 0
-        )
-        ORDER BY s.last_active_at_ms DESC
-    ";
+        WHERE (EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.session_id = s.session_id AND e.is_archived = 0
+        ) OR s.source IN ('discovery', 'cursor-discovery'))
+        {extra_where}
+        ORDER BY s.last_active_at_ms DESC"
+    );
 
     let mut statement = db
-        .prepare(sql)
+        .prepare(&sql)
         .map_err(|error| ApiError::Internal(format!("failed to prepare sessions query: {error:?}")))?;
     let mut rows = statement
-        .query([])
+        .query(params_from_iter(params.iter()))
         .map_err(|error| ApiError::Internal(format!("failed to execute sessions query: {error:?}")))?;
 
     let mut items = Vec::new();
@@ -247,10 +286,56 @@ pub(super) async fn get_sessions(State(state): State<AppState>) -> Result<Json<V
             evaluation_count: row.get::<_, i64>(5).map_err(|error| {
                 ApiError::Internal(format!("failed to decode evaluation_count: {error:?}"))
             })? as u64,
+            first_prompt: row.get(6).map_err(|error| {
+                ApiError::Internal(format!("failed to decode first_prompt: {error:?}"))
+            })?,
+            duration_minutes: row.get(7).map_err(|error| {
+                ApiError::Internal(format!("failed to decode duration_minutes: {error:?}"))
+            })?,
+            input_tokens: row.get(8).map_err(|error| {
+                ApiError::Internal(format!("failed to decode input_tokens: {error:?}"))
+            })?,
+            output_tokens: row.get(9).map_err(|error| {
+                ApiError::Internal(format!("failed to decode output_tokens: {error:?}"))
+            })?,
+            goal: row.get(10).map_err(|error| {
+                ApiError::Internal(format!("failed to decode goal: {error:?}"))
+            })?,
+            summary: row.get(11).map_err(|error| {
+                ApiError::Internal(format!("failed to decode summary: {error:?}"))
+            })?,
+            outcome: row.get(12).map_err(|error| {
+                ApiError::Internal(format!("failed to decode outcome: {error:?}"))
+            })?,
+            source: row.get(13).map_err(|error| {
+                ApiError::Internal(format!("failed to decode source: {error:?}"))
+            })?,
         });
     }
 
     Ok(Json(items))
+}
+
+pub(super) async fn discover_sessions(
+    State(state): State<AppState>,
+) -> Result<Json<discovery::DiscoverResult>, ApiError> {
+    let discovered = discovery::scan_session_meta();
+    let cursor_discovered = cursor_discovery::scan_cursor_sessions();
+
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
+
+    let mut result = discovery::import_discovered_sessions(&mut db, &discovered);
+
+    let cursor_result = cursor_discovery::import_cursor_sessions(&mut db, &cursor_discovered);
+    result.cursor_scanned = cursor_result.scanned;
+    result.cursor_imported = cursor_result.imported;
+    result.cursor_updated = cursor_result.updated;
+    result.cursor_errors = cursor_result.errors;
+
+    Ok(Json(result))
 }
 
 pub(super) async fn get_transcript(
@@ -343,6 +428,7 @@ pub(super) async fn get_transcript(
                 imported_offset_bytes: 0,
                 last_error_message: None,
                 last_error_stack: None,
+                skipped_lines: 0,
             }));
         }
         Err(error) => {
@@ -388,12 +474,12 @@ pub(super) async fn get_transcript(
             .map_err(|error| ApiError::Internal(format!("failed to execute transcript query: {error:?}")))?
     };
 
-    let mut items_desc: Vec<TranscriptLineItem> = Vec::new();
+    let mut all_rows: Vec<TranscriptLineItem> = Vec::new();
     while let Some(row) = rows
         .next()
         .map_err(|error| ApiError::Internal(format!("failed to read transcript row: {error:?}")))?
     {
-        items_desc.push(TranscriptLineItem {
+        all_rows.push(TranscriptLineItem {
             line_no: row.get(0).map_err(|error| {
                 ApiError::Internal(format!("failed to decode transcript line_no: {error:?}"))
             })?,
@@ -403,26 +489,55 @@ pub(super) async fn get_transcript(
         });
     }
 
-    let has_more = items_desc.len() > page_size;
+    let has_more = all_rows.len() > page_size;
     if has_more {
-        items_desc.truncate(page_size);
+        all_rows.truncate(page_size);
     }
-    items_desc.reverse();
+    all_rows.reverse();
     let next_before_line_no = if has_more {
-        items_desc.first().map(|item| item.line_no)
+        all_rows.first().map(|item| item.line_no)
     } else {
         None
     };
 
+    let mut skipped_lines: u32 = 0;
+    let mut valid_items: Vec<TranscriptLineItem> = Vec::with_capacity(all_rows.len());
+    for item in &all_rows {
+        let trimmed = item.line_content.trim();
+        if trimmed.is_empty() {
+            valid_items.push(item.clone());
+            continue;
+        }
+        match serde_json::from_str::<Value>(trimmed) {
+            Ok(val) if val.is_object() => {
+                valid_items.push(item.clone());
+            }
+            _ => {
+                tracing::warn!(
+                    session_id = %query.session_id,
+                    line_no = item.line_no,
+                    "transcript line is not valid JSON object, skipping"
+                );
+                skipped_lines += 1;
+            }
+        }
+    }
+
+    // Fallback: if all lines were invalid, return raw content so the user can at least see something
+    if valid_items.is_empty() && skipped_lines > 0 {
+        valid_items = all_rows;
+    }
+
     Ok(Json(TranscriptItem {
         session_id: query.session_id,
-        items: items_desc,
+        items: valid_items,
         has_more,
         next_before_line_no,
         updated_at_ms,
         imported_offset_bytes,
         last_error_message,
         last_error_stack,
+        skipped_lines,
     }))
 }
 
@@ -750,4 +865,283 @@ pub(super) async fn sync_transcript(
         lines_imported,
         message: format!("synced {lines_imported} new lines from transcript file"),
     }))
+}
+
+pub(super) async fn get_ai_tracking_commits(
+    Query(query): Query<AiTrackingCommitsQuery>,
+) -> Result<Json<cursor_ai_tracking::ScoredCommitsResponse>, ApiError> {
+    let page = query.page.unwrap_or(1);
+    let page_size = query.page_size.unwrap_or(50);
+    cursor_ai_tracking::query_scored_commits(page, page_size)
+        .map(Json)
+        .map_err(ApiError::Internal)
+}
+
+pub(super) async fn get_ai_tracking_stats(
+) -> Result<Json<cursor_ai_tracking::AiTrackingStats>, ApiError> {
+    cursor_ai_tracking::query_ai_code_stats()
+        .map(Json)
+        .map_err(ApiError::Internal)
+}
+
+pub(super) async fn get_app_config(
+    State(state): State<AppState>,
+) -> Json<AppConfigResponse> {
+    Json(AppConfigResponse {
+        event_enabled: state.event_enabled,
+    })
+}
+
+#[derive(Deserialize)]
+pub(super) struct ConfigsQuery {
+    source: Option<String>,
+}
+
+pub(super) async fn get_configs(
+    Query(params): Query<ConfigsQuery>,
+) -> Result<Json<config_scanner::ConfigsResponse>, ApiError> {
+    let project_paths = config_scanner::discover_project_paths();
+    let mut items = config_scanner::scan_all_configs(&project_paths);
+
+    if let Some(source) = &params.source {
+        items.retain(|item| item.source == *source);
+    }
+
+    let project_count = project_paths.len();
+    Ok(Json(config_scanner::ConfigsResponse {
+        items,
+        project_count,
+    }))
+}
+
+pub(super) async fn get_dashboard_activity(
+    State(state): State<AppState>,
+    Query(query): Query<DashboardActivityQuery>,
+) -> Result<Json<DashboardActivityResponse>, ApiError> {
+    let days = query.days.unwrap_or(30).clamp(1, 365);
+    let cutoff_ms = now_timestamp_ms() - (days as i64) * 24 * 60 * 60 * 1000;
+
+    let db = state
+        .db
+        .lock()
+        .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
+
+    let daily_sql = "
+        SELECT
+            date(last_active_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+            COUNT(*) AS session_count,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens
+        FROM sessions
+        WHERE last_active_at_ms >= ?1
+        GROUP BY date
+        ORDER BY date ASC
+    ";
+
+    let mut statement = db
+        .prepare(daily_sql)
+        .map_err(|error| ApiError::Internal(format!("failed to prepare dashboard activity query: {error:?}")))?;
+    let mut rows = statement
+        .query(params![cutoff_ms])
+        .map_err(|error| ApiError::Internal(format!("failed to execute dashboard activity query: {error:?}")))?;
+
+    let mut daily = Vec::new();
+    let mut total_sessions: i64 = 0;
+    let mut total_input_tokens: i64 = 0;
+    let mut total_output_tokens: i64 = 0;
+
+    while let Some(row) = rows
+        .next()
+        .map_err(|error| ApiError::Internal(format!("failed to read dashboard activity row: {error:?}")))?
+    {
+        let session_count: i64 = row.get(1).unwrap_or(0);
+        let input_tokens: i64 = row.get(2).unwrap_or(0);
+        let output_tokens: i64 = row.get(3).unwrap_or(0);
+
+        total_sessions += session_count;
+        total_input_tokens += input_tokens;
+        total_output_tokens += output_tokens;
+
+        daily.push(DailyActivity {
+            date: row.get(0).unwrap_or_default(),
+            session_count,
+            input_tokens,
+            output_tokens,
+        });
+    }
+
+    Ok(Json(DashboardActivityResponse {
+        daily,
+        total_sessions,
+        total_input_tokens,
+        total_output_tokens,
+    }))
+}
+
+pub(super) async fn get_token_stats(
+    State(state): State<AppState>,
+    Query(query): Query<TokenStatsQuery>,
+) -> Result<Json<TokenStatsResponse>, ApiError> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|error| ApiError::Internal(format!("failed to lock sqlite connection: {error:?}")))?;
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut bind_values: Vec<SqlValue> = Vec::new();
+
+    if let Some(from_ms) = query.from_ms {
+        conditions.push(format!("last_active_at_ms >= ?{}", bind_values.len() + 1));
+        bind_values.push(SqlValue::Integer(from_ms));
+    }
+    if let Some(to_ms) = query.to_ms {
+        conditions.push(format!("last_active_at_ms <= ?{}", bind_values.len() + 1));
+        bind_values.push(SqlValue::Integer(to_ms));
+    }
+    if let Some(ref source) = query.source {
+        conditions.push(format!("source = ?{}", bind_values.len() + 1));
+        bind_values.push(SqlValue::Text(source.clone()));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let daily_sql = format!(
+        "SELECT
+            date(last_active_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+            COUNT(*) AS session_count,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens
+        FROM sessions
+        {where_clause}
+        GROUP BY date
+        ORDER BY date ASC"
+    );
+
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        bind_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+
+    let mut daily_stmt = db
+        .prepare(&daily_sql)
+        .map_err(|error| ApiError::Internal(format!("failed to prepare token stats daily query: {error:?}")))?;
+    let mut daily_rows = daily_stmt
+        .query(params_ref.as_slice())
+        .map_err(|error| ApiError::Internal(format!("failed to execute token stats daily query: {error:?}")))?;
+
+    let mut daily = Vec::new();
+    while let Some(row) = daily_rows
+        .next()
+        .map_err(|error| ApiError::Internal(format!("failed to read token stats daily row: {error:?}")))?
+    {
+        daily.push(TokenDailyStat {
+            date: row.get(0).unwrap_or_default(),
+            session_count: row.get(1).unwrap_or(0),
+            input_tokens: row.get(2).unwrap_or(0),
+            output_tokens: row.get(3).unwrap_or(0),
+        });
+    }
+    drop(daily_rows);
+    drop(daily_stmt);
+
+    let sessions_sql = format!(
+        "SELECT session_id, project_name, agent_type, source,
+                input_tokens, output_tokens, last_active_at_ms, first_prompt
+        FROM sessions
+        {where_clause}
+        ORDER BY (input_tokens + output_tokens) DESC, last_active_at_ms DESC"
+    );
+
+    let params_ref2: Vec<&dyn rusqlite::types::ToSql> =
+        bind_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+
+    let mut sessions_stmt = db
+        .prepare(&sessions_sql)
+        .map_err(|error| ApiError::Internal(format!("failed to prepare token stats sessions query: {error:?}")))?;
+    let mut session_rows = sessions_stmt
+        .query(params_ref2.as_slice())
+        .map_err(|error| ApiError::Internal(format!("failed to execute token stats sessions query: {error:?}")))?;
+
+    let mut sessions = Vec::new();
+    while let Some(row) = session_rows
+        .next()
+        .map_err(|error| ApiError::Internal(format!("failed to read token stats session row: {error:?}")))?
+    {
+        sessions.push(TokenSessionStat {
+            session_id: row.get(0).unwrap_or_default(),
+            project_name: row.get(1).unwrap_or_default(),
+            agent_type: row.get(2).unwrap_or_default(),
+            source: row.get(3).unwrap_or_default(),
+            input_tokens: row.get(4).unwrap_or(0),
+            output_tokens: row.get(5).unwrap_or(0),
+            last_active_at_ms: row.get(6).unwrap_or(0),
+            first_prompt: row.get(7).unwrap_or_default(),
+        });
+    }
+    drop(session_rows);
+    drop(sessions_stmt);
+
+    let totals_sql = format!(
+        "SELECT
+            COALESCE(SUM(input_tokens), 0),
+            COALESCE(SUM(output_tokens), 0),
+            COUNT(*)
+        FROM sessions
+        {where_clause}"
+    );
+
+    let params_ref3: Vec<&dyn rusqlite::types::ToSql> =
+        bind_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+
+    let mut totals_stmt = db
+        .prepare(&totals_sql)
+        .map_err(|error| ApiError::Internal(format!("failed to prepare token stats totals query: {error:?}")))?;
+    let mut totals_rows = totals_stmt
+        .query(params_ref3.as_slice())
+        .map_err(|error| ApiError::Internal(format!("failed to execute token stats totals query: {error:?}")))?;
+
+    let (total_input_tokens, total_output_tokens, total_sessions) = if let Some(row) = totals_rows
+        .next()
+        .map_err(|error| ApiError::Internal(format!("failed to read token stats totals row: {error:?}")))?
+    {
+        (
+            row.get::<_, i64>(0).unwrap_or(0),
+            row.get::<_, i64>(1).unwrap_or(0),
+            row.get::<_, i64>(2).unwrap_or(0),
+        )
+    } else {
+        (0, 0, 0)
+    };
+
+    let avg_tokens_per_session = if total_sessions > 0 {
+        (total_input_tokens + total_output_tokens) / total_sessions
+    } else {
+        0
+    };
+
+    Ok(Json(TokenStatsResponse {
+        daily,
+        sessions,
+        total_input_tokens,
+        total_output_tokens,
+        total_sessions,
+        avg_tokens_per_session,
+    }))
+}
+
+pub(super) async fn get_config_content(
+    axum::extract::Path(config_id): axum::extract::Path<String>,
+) -> Result<Json<config_scanner::ConfigContentResponse>, ApiError> {
+    let project_paths = config_scanner::discover_project_paths();
+    let items = config_scanner::scan_all_configs(&project_paths);
+    let item = items
+        .iter()
+        .find(|i| i.id == config_id)
+        .ok_or_else(|| ApiError::NotFound(format!("config not found: {config_id}")))?;
+
+    config_scanner::read_config_content(item)
+        .map(Json)
+        .map_err(ApiError::Internal)
 }

@@ -56,6 +56,48 @@ fn backup_file(path: &PathBuf) -> Result<(), String> {
     let backup_path = path.with_file_name(backup_name);
     std::fs::copy(path, &backup_path)
         .map_err(|e| format!("failed to create backup at {}: {e}", backup_path.display()))?;
+    if let Err(e) = cleanup_old_backups(path, 5) {
+        tracing::warn!(path = %path.display(), error = %e, "backup cleanup failed");
+    }
+    Ok(())
+}
+
+fn cleanup_old_backups(path: &PathBuf, keep_count: usize) -> Result<(), String> {
+    let parent = path.parent().ok_or("no parent directory")?;
+    let file_stem = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let prefix = format!("{file_stem}.bak.");
+
+    let mut backups: Vec<(std::path::PathBuf, std::time::SystemTime)> = std::fs::read_dir(parent)
+        .map_err(|e| format!("failed to read backup directory: {e}"))?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&prefix)
+        })
+        .filter_map(|entry| {
+            let mtime = entry.metadata().ok()?.modified().ok()?;
+            Some((entry.path(), mtime))
+        })
+        .collect();
+
+    if backups.len() <= keep_count {
+        return Ok(());
+    }
+
+    backups.sort_by(|a, b| b.1.cmp(&a.1));
+
+    for (old_path, _) in backups.into_iter().skip(keep_count) {
+        if let Err(e) = std::fs::remove_file(&old_path) {
+            tracing::warn!(path = %old_path.display(), error = %e, "failed to remove old backup");
+        }
+    }
+
     Ok(())
 }
 
@@ -64,14 +106,9 @@ fn chrono_timestamp() -> String {
 }
 
 fn write_settings_file(path: &PathBuf, value: &Value) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create parent dirs for {}: {e}", path.display()))?;
-    }
     let serialized = serde_json::to_string_pretty(value)
         .map_err(|e| format!("failed to serialize settings JSON: {e}"))?;
-    std::fs::write(path, format!("{serialized}\n"))
-        .map_err(|e| format!("failed to write {}: {e}", path.display()))
+    super::atomic_write(path, format!("{serialized}\n").as_bytes())
 }
 
 fn report_event_command() -> String {
@@ -165,10 +202,14 @@ pub(super) fn init_hooks() -> Result<HooksInitResponse, String> {
             Some(block) => block
                 .get_mut("hooks")
                 .and_then(Value::as_array_mut)
-                .unwrap(),
+                .ok_or_else(|| format!(
+                    "hooks.{event_name} block has invalid structure: expected 'hooks' to be an array"
+                ))?,
             None => {
                 let new_block = serde_json::json!({"matcher": "*", "hooks": []});
                 blocks_arr.push(new_block);
+                // Safe: we just pushed, so last_mut() is guaranteed Some.
+                // The pushed value is json!({"matcher":"*","hooks":[]}), so "hooks" exists and is an array.
                 blocks_arr
                     .last_mut()
                     .unwrap()

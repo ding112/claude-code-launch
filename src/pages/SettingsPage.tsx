@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import AddCommandInput from "../components/AddCommandInput";
 import { useEvalSettings } from "../hooks/useEvalSettings";
 import { useHooksConfig } from "../hooks/useHooksConfig";
+import { fetchAppConfig } from "../api";
 import { KNOWN_EVENTS } from "../constants";
 import { Card, CardHeader, CardTitle, CardAction, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ export default function SettingsPage() {
   } = useHooksConfig();
 
   const [addEventValue, setAddEventValue] = useState("");
+  const [eventEnabled, setEventEnabled] = useState(false);
 
   const availableEvents = useMemo(
     () => KNOWN_EVENTS.filter((e) => !hooksData.events[e]),
@@ -43,7 +45,12 @@ export default function SettingsPage() {
 
   useEffect(() => {
     void loadSettings();
-    void loadHooks();
+    void fetchAppConfig().then((cfg) => {
+      setEventEnabled(cfg.event_enabled);
+      if (cfg.event_enabled) {
+        void loadHooks();
+      }
+    });
   }, []);
 
   return (
@@ -146,7 +153,7 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="lg:overflow-y-auto min-w-0">
+      {eventEnabled && <Card className="lg:overflow-y-auto min-w-0">
         <CardHeader>
           <CardTitle>Hooks 配置</CardTitle>
           <CardAction className="flex items-center gap-2">
@@ -270,7 +277,7 @@ export default function SettingsPage() {
             </>
           )}
         </CardContent>
-      </Card>
+      </Card>}
     </section>
   );
 }

@@ -10,11 +10,13 @@ const CONFIG_PATH_ENV: &str = "CLAUDE_CODE_LAUNCH_CONFIG_PATH";
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     db_path: Option<String>,
+    event_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub db_path: String,
+    pub event_enabled: bool,
 }
 
 fn expand_tilde(path: &str) -> String {
@@ -41,7 +43,7 @@ pub fn load_app_config() -> Result<AppConfig, String> {
 }
 
 fn default_config_json() -> String {
-    format!("{{\n  \"db_path\": \"{DEFAULT_DB_PATH}\"\n}}\n")
+    format!("{{\n  \"db_path\": \"{DEFAULT_DB_PATH}\",\n  \"event_enabled\": false\n}}\n")
 }
 
 fn load_from_path(config_path: &Path) -> Result<AppConfig, String> {
@@ -61,6 +63,7 @@ fn load_from_path(config_path: &Path) -> Result<AppConfig, String> {
         );
         return Ok(AppConfig {
             db_path: DEFAULT_DB_PATH.to_string(),
+            event_enabled: false,
         });
     }
 
@@ -86,13 +89,16 @@ fn load_from_path(config_path: &Path) -> Result<AppConfig, String> {
         ));
     }
 
+    let event_enabled = raw.event_enabled.unwrap_or(false);
+
     println!(
-        "loaded config from {}: db_path={}",
+        "loaded config from {}: db_path={}, event_enabled={}",
         config_path.display(),
         db_path,
+        event_enabled,
     );
 
-    Ok(AppConfig { db_path })
+    Ok(AppConfig { db_path, event_enabled })
 }
 
 #[cfg(test)]

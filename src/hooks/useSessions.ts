@@ -1,14 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
-import type { SessionItem } from "../types";
-import { fetchSessions, archiveSession } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { SessionItem, DiscoverResult } from "../types";
+import { fetchSessions, archiveSession, discoverSessions } from "../api";
+
+export type DateRangePreset = "7d" | "30d" | "all";
+
+function presetToFromMs(preset: DateRangePreset): number | undefined {
+  if (preset === "all") return undefined;
+  const days = preset === "7d" ? 7 : 30;
+  return Date.now() - days * 24 * 60 * 60 * 1000;
+}
 
 export function useSessions() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
   const [sessionMessage, setSessionMessage] = useState<string>("");
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+
+  const [sourceFilter, setSourceFilter] = useState<string | undefined>();
+  const [datePreset, setDatePreset] = useState<DateRangePreset>("all");
+
+  const sourceFilterRef = useRef(sourceFilter);
+  const datePresetRef = useRef(datePreset);
+  sourceFilterRef.current = sourceFilter;
+  datePresetRef.current = datePreset;
 
   const selectedSession = useMemo(
     () => sessions.find((s) => s.session_id === selectedSessionId),
@@ -50,7 +67,10 @@ export function useSessions() {
   const loadSessions = async (): Promise<SessionItem[]> => {
     setLoading(true);
     try {
-      const data = await fetchSessions();
+      const data = await fetchSessions({
+        source: sourceFilterRef.current,
+        fromMs: presetToFromMs(datePresetRef.current),
+      });
       setSessions(data);
       if (!selectedSessionId && data.length > 0) {
         setSelectedSessionId(data[0].session_id);
@@ -63,7 +83,6 @@ export function useSessions() {
 
   const archiveSelectedSession = async (
     clearEvents: () => void,
-    clearEvaluations: () => void,
   ) => {
     if (!selectedSessionId) return;
 
@@ -85,12 +104,40 @@ export function useSessions() {
         setSelectedSessionId(nextSessionId);
         if (!nextSessionId) {
           clearEvents();
-          clearEvaluations();
         }
       }
       setSessionMessage("已归档当前 session。");
     } finally {
       setArchiving(false);
+    }
+  };
+
+  const runDiscover = async (): Promise<DiscoverResult | null> => {
+    setDiscovering(true);
+    setSessionMessage("");
+    try {
+      const result = await discoverSessions();
+      await loadSessions();
+      const parts: string[] = [];
+      if (result.scanned > 0 || result.imported > 0 || result.updated > 0) {
+        parts.push(
+          `Claude Code: 扫描 ${result.scanned}，导入 ${result.imported}，更新 ${result.updated}${result.errors > 0 ? `，错误 ${result.errors}` : ""}`,
+        );
+      }
+      if (result.cursor_scanned > 0 || result.cursor_imported > 0 || result.cursor_updated > 0) {
+        parts.push(
+          `Cursor: 扫描 ${result.cursor_scanned}，导入 ${result.cursor_imported}，更新 ${result.cursor_updated}${result.cursor_errors > 0 ? `，错误 ${result.cursor_errors}` : ""}`,
+        );
+      }
+      setSessionMessage(
+        parts.length > 0 ? parts.join("；") + "。" : "未发现新的历史 session。",
+      );
+      return result;
+    } catch {
+      setSessionMessage("发现历史 session 失败，请稍后重试。");
+      return null;
+    } finally {
+      setDiscovering(false);
     }
   };
 
@@ -103,9 +150,15 @@ export function useSessions() {
     collapsedProjects,
     loading,
     archiving,
+    discovering,
     sessionMessage,
+    sourceFilter,
+    setSourceFilter,
+    datePreset,
+    setDatePreset,
     toggleProject,
     loadSessions,
     archiveSelectedSession,
+    runDiscover,
   };
 }

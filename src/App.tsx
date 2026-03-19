@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import TabSwitcher, { type Tab } from "./components/TabSwitcher";
+import DashboardPage from "./pages/DashboardPage";
 import SessionsPage from "./pages/SessionsPage";
+import ConfigPage from "./pages/ConfigPage";
+import StatsPage from "./pages/StatsPage";
 import SettingsPage from "./pages/SettingsPage";
 import SetupPage from "./pages/SetupPage";
 import type { LogEvent, PrereqResult } from "./types";
@@ -13,7 +16,7 @@ type AppMode = "loading" | "setup" | "dashboard";
 function App() {
   const [logs, setLogs] = useState<LogEvent[]>([]);
   const [mode, setMode] = useState<AppMode>("loading");
-  const [tab, setTab] = useState<Tab>("sessions");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [initialPrereqs, setInitialPrereqs] = useState<PrereqResult | null>(null);
 
   useEffect(() => {
@@ -64,15 +67,18 @@ function App() {
   }
 
   return (
-    <main className="min-h-screen bg-background flex flex-col">
-      <header className="flex items-center justify-between border-b px-6 py-3 bg-card">
+    <main className="h-screen bg-background flex flex-col overflow-hidden">
+      <header className="flex items-center justify-between border-b px-6 py-3 bg-card shrink-0">
         <h1 className="text-lg font-bold tracking-tight">
           Claude Code Launch
         </h1>
         <TabSwitcher tab={tab} onTabChange={setTab} />
       </header>
 
+      {tab === "dashboard" && <DashboardPage onNavigate={setTab} />}
       {tab === "sessions" && <SessionsPage />}
+      {tab === "config" && <ConfigPage />}
+      {tab === "stats" && <StatsPage />}
       {tab === "settings" && <SettingsPage />}
       {tab === "setup" && (
         <SetupPage logs={logs} initialPrereqs={initialPrereqs} />

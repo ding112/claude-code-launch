@@ -1,11 +1,19 @@
 import { API_BASE, TRANSCRIPT_PAGE_SIZE } from "./constants";
 import type {
   SessionItem,
+  DiscoverResult,
   EventResponse,
   EvaluationResponse,
   EvalSettings,
   HooksData,
   HooksInitResult,
+  ScoredCommitsResponse,
+  AiTrackingStats,
+  AppConfigData,
+  ConfigsResponse,
+  ConfigContentResponse,
+  DashboardActivityResponse,
+  TokenStatsResponse,
 } from "./types";
 
 async function assertOk(response: Response): Promise<Response> {
@@ -16,8 +24,18 @@ async function assertOk(response: Response): Promise<Response> {
   return response;
 }
 
-export async function fetchSessions(): Promise<SessionItem[]> {
-  const response = await assertOk(await fetch(`${API_BASE}/sessions`));
+export async function fetchSessions(opts?: {
+  source?: string;
+  fromMs?: number;
+  toMs?: number;
+}): Promise<SessionItem[]> {
+  const params = new URLSearchParams();
+  if (opts?.source) params.set("source", opts.source);
+  if (opts?.fromMs != null) params.set("from_ms", String(opts.fromMs));
+  if (opts?.toMs != null) params.set("to_ms", String(opts.toMs));
+  const qs = params.toString();
+  const url = qs ? `${API_BASE}/sessions?${qs}` : `${API_BASE}/sessions`;
+  const response = await assertOk(await fetch(url));
   return (await response.json()) as SessionItem[];
 }
 
@@ -113,6 +131,16 @@ export async function initHooksApi(): Promise<HooksInitResult | null> {
   return (await response.json()) as HooksInitResult;
 }
 
+export async function discoverSessions(): Promise<DiscoverResult> {
+  const response = await assertOk(
+    await fetch(`${API_BASE}/sessions/discover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  return (await response.json()) as DiscoverResult;
+}
+
 export async function archiveSession(sessionId: string): Promise<boolean> {
   const response = await fetch(`${API_BASE}/sessions/archive`, {
     method: "POST",
@@ -120,4 +148,66 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
     body: JSON.stringify({ session_id: sessionId }),
   });
   return response.ok;
+}
+
+export async function fetchAiTrackingCommits(
+  page = 1,
+  pageSize = 50,
+): Promise<ScoredCommitsResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  const response = await assertOk(
+    await fetch(`${API_BASE}/cursor/ai-tracking/commits?${params.toString()}`),
+  );
+  return (await response.json()) as ScoredCommitsResponse;
+}
+
+export async function fetchAiTrackingStats(): Promise<AiTrackingStats> {
+  const response = await assertOk(
+    await fetch(`${API_BASE}/cursor/ai-tracking/stats`),
+  );
+  return (await response.json()) as AiTrackingStats;
+}
+
+export async function fetchAppConfig(): Promise<AppConfigData> {
+  const response = await assertOk(await fetch(`${API_BASE}/app-config`));
+  return (await response.json()) as AppConfigData;
+}
+
+export async function fetchConfigs(source?: string): Promise<ConfigsResponse> {
+  const params = source ? `?source=${encodeURIComponent(source)}` : "";
+  const response = await assertOk(await fetch(`${API_BASE}/configs${params}`));
+  return (await response.json()) as ConfigsResponse;
+}
+
+export async function fetchConfigContent(id: string): Promise<ConfigContentResponse> {
+  const response = await assertOk(
+    await fetch(`${API_BASE}/configs/${encodeURIComponent(id)}/content`),
+  );
+  return (await response.json()) as ConfigContentResponse;
+}
+
+export async function fetchDashboardActivity(days?: number): Promise<DashboardActivityResponse> {
+  const params = days ? `?days=${days}` : "";
+  const response = await assertOk(
+    await fetch(`${API_BASE}/dashboard/activity${params}`),
+  );
+  return (await response.json()) as DashboardActivityResponse;
+}
+
+export async function fetchTokenStats(opts?: {
+  fromMs?: number;
+  toMs?: number;
+  source?: string;
+}): Promise<TokenStatsResponse> {
+  const params = new URLSearchParams();
+  if (opts?.fromMs != null) params.set("from_ms", String(opts.fromMs));
+  if (opts?.toMs != null) params.set("to_ms", String(opts.toMs));
+  if (opts?.source) params.set("source", opts.source);
+  const qs = params.toString();
+  const url = qs ? `${API_BASE}/stats/tokens?${qs}` : `${API_BASE}/stats/tokens`;
+  const response = await assertOk(await fetch(url));
+  return (await response.json()) as TokenStatsResponse;
 }

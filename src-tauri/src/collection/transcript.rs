@@ -171,23 +171,31 @@ pub(super) fn validate_transcript_path(raw: &str) -> Option<String> {
 
     let home = dirs::home_dir().map(|h| h.canonicalize().unwrap_or(h));
 
+    let allowed_dirs: Vec<std::path::PathBuf> = home
+        .as_ref()
+        .map(|h| {
+            vec![
+                h.join(".claude").join("projects"),
+                h.join(".cursor").join("projects"),
+            ]
+        })
+        .unwrap_or_default();
+
     if let Ok(canonical) = path.canonicalize() {
-        if let Some(home) = &home {
-            let allowed_dir = home.join(".claude").join("projects");
-            if !canonical.starts_with(&allowed_dir) {
-                eprintln!("level=warn event=transcript_path_rejected reason=outside_allowed_dir path={raw}");
-                return None;
-            }
+        if !allowed_dirs.is_empty()
+            && !allowed_dirs.iter().any(|dir| canonical.starts_with(dir))
+        {
+            eprintln!("level=warn event=transcript_path_rejected reason=outside_allowed_dir path={raw}");
+            return None;
         }
         return Some(canonical.to_string_lossy().to_string());
     }
 
-    if let Some(home) = &home {
-        let allowed_dir = home.join(".claude").join("projects");
-        if !path.starts_with(&allowed_dir) {
-            eprintln!("level=warn event=transcript_path_rejected reason=outside_allowed_dir_unresolved path={raw}");
-            return None;
-        }
+    if !allowed_dirs.is_empty()
+        && !allowed_dirs.iter().any(|dir| path.starts_with(dir))
+    {
+        eprintln!("level=warn event=transcript_path_rejected reason=outside_allowed_dir_unresolved path={raw}");
+        return None;
     }
     Some(raw.to_string())
 }

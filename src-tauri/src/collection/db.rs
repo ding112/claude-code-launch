@@ -103,6 +103,62 @@ fn ensure_session_columns(db: &Connection) -> rusqlite::Result<()> {
         "agent_type",
         "TEXT NOT NULL DEFAULT ''",
     )?;
+    add_column_if_missing(
+        db,
+        "sessions",
+        &columns,
+        "first_prompt",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    add_column_if_missing(
+        db,
+        "sessions",
+        &columns,
+        "duration_minutes",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        db,
+        "sessions",
+        &columns,
+        "input_tokens",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        db,
+        "sessions",
+        &columns,
+        "output_tokens",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        db,
+        "sessions",
+        &columns,
+        "goal",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    add_column_if_missing(
+        db,
+        "sessions",
+        &columns,
+        "summary",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    add_column_if_missing(
+        db,
+        "sessions",
+        &columns,
+        "outcome",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    add_column_if_missing(
+        db,
+        "sessions",
+        &columns,
+        "source",
+        "TEXT NOT NULL DEFAULT 'event'",
+    )?;
     Ok(())
 }
 
